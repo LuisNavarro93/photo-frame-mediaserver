@@ -18,6 +18,18 @@ This machine is set up to run unattended as two things at once:
 The scripts below implement the scheduling and logging around the first
 role; Jellyfin (documented near the bottom) handles the second.
 
+## System characteristics
+
+Specs of the machine this is deployed on, for reference:
+
+| | |
+|---|---|
+| OS | Ubuntu 26.04 LTS (Resolute Raccoon), kernel 7.0.0-28-generic |
+| CPU | Intel Core i5-5300U @ 2.30GHz (2 cores / 4 threads) |
+| GPU | Intel HD Graphics 5500 (Broadwell-U) |
+| RAM | 7.5 GiB |
+| Storage | 110 GB disk, ~31 GB free |
+
 ## power-schedule
 
 Shuts the machine down every night and sets an RTC wake alarm for the next
