@@ -30,6 +30,31 @@ Specs of the machine this is deployed on, for reference:
 | RAM | 7.5 GiB |
 | Storage | 110 GB disk, ~31 GB free |
 
+## Dependencies
+
+Packages this setup relies on. All installed via `apt`; versions shown are
+what's currently running on the machine.
+
+| Package | Used for | Version |
+|---|---|---|
+| `util-linux` (`rtcwake`) | power-schedule — shutdown + RTC wake alarm | 2.41.3-3ubuntu2 |
+| `mpv` | slideshow — fullscreen image playback | 0.41.0-2ubuntu4 |
+| `openssh-server` | remote access | 10.2p1-2ubuntu3.5 |
+| `vsftpd` | FTP access | 3.0.5-0.4 |
+| `jellyfin` | media server | 10.11.11+ubu2604 |
+| `git` | version control for this repo | 2.53.0-1ubuntu1 |
+| `neovim` | editing scripts/config on the machine directly | 0.11.6-1 |
+| `vim` | same, fallback/alternative editor | 9.1.2141-1ubuntu4.7 |
+| `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
+
+Install everything at once:
+```bash
+sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl
+```
+
+`util-linux` ships as part of the base Ubuntu install, so `rtcwake` is
+normally already present without needing to install it explicitly.
+
 ## power-schedule
 
 Shuts the machine down every night and sets an RTC wake alarm for the next
