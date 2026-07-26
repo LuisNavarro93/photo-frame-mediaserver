@@ -1,0 +1,10 @@
+[Unit]
+Description=Log system startup time to schedule.log
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/log-boot.sh
+
+[Install]
+WantedBy=multi-user.target
