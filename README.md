@@ -1,7 +1,7 @@
 # laptop-scripts
 
-Scripts that run this machine's unattended power schedule, boot logging, and
-photo slideshow. This repo is a mirror of what's actually deployed on the
+Scripts that run an unattended machine's power schedule, boot logging, and
+photo/video slideshow. This repo is a mirror of what's actually deployed on the
 device — each subfolder notes where its files live on disk and how they're
 installed, so the setup can be reproduced after a reinstall.
 
