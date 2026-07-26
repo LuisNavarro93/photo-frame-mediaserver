@@ -5,6 +5,8 @@ photo/video slideshow. This repo is a mirror of what's actually deployed on the
 device — each subfolder notes where its files live on disk and how they're
 installed, so the setup can be reproduced after a reinstall.
 
+![alt text](https://github.com/LuisNavarro93/photo-frame-mediaserver/blob/mdia/portrait_landing.jpg)
+
 ## Purpose
 
 This machine is set up to run unattended as two things at once:
