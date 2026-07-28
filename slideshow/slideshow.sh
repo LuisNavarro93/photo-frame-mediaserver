@@ -8,6 +8,7 @@ xset s noblank
 
 PLAYLIST=/tmp/slideshow_playlist.txt
 MEDIA_DIR=~/Pictures
+LOGFILE=/home/portrait/Desktop/logs/schedule.log
 
 while true; do
     find "$MEDIA_DIR" -type f -not -name '.*' | shuf > "$PLAYLIST"
@@ -16,5 +17,13 @@ while true; do
         --vo=x11 \
         --no-osc \
         --image-display-duration=6 \
-        --playlist="$PLAYLIST"
+        --playlist="$PLAYLIST" 2>&1 | \
+    stdbuf -oL grep --line-buffered -iE '^Playing:|error|fail|warning|cannot|unsupported|invalid' | \
+    while IFS= read -r line; do
+        if [[ "$line" == Playing:* ]]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - SLIDESHOW - ${line#Playing: }" >> "$LOGFILE"
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - SLIDESHOW-ERROR - $line" >> "$LOGFILE"
+        fi
+    done
 done

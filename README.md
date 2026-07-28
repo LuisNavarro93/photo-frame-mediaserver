@@ -100,6 +100,15 @@ than relying on mpv's own `--shuffle` (which only shuffles once per launch,
 not per loop). `DISPLAY` and `XAUTHORITY` are exported explicitly since the
 script runs from an autostart context rather than an interactive shell.
 
+`mpv`'s output is piped through a filter that logs to
+`~/Desktop/logs/schedule.log` alongside the power-schedule/boot-logging
+entries: each `Playing: ...` line is logged as `SLIDESHOW`, and any line
+matching error/fail/warning/cannot/unsupported/invalid (case-insensitive) is
+logged as `SLIDESHOW-ERROR`. This catches per-file playback problems -- e.g.
+some HEIC files decode to an unexpected embedded thumbnail track, or a
+corrupt/unrecognized file fails to load outright -- without needing a
+terminal open to see them.
+
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow.desktop` → deployed to `~/.config/autostart/slideshow.desktop`
 
