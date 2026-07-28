@@ -94,6 +94,11 @@ it's runtime data, not a script).
 
 Full-screen `mpv` photo slideshow of `~/Pictures/`, launched at login via
 LXQt autostart, with screen blanking/DPMS disabled so it doesn't sleep mid-show.
+Each loop, the file list is re-shuffled into a playlist file
+(`/tmp/slideshow_playlist.txt`) and handed to `mpv` via `--playlist`, rather
+than relying on mpv's own `--shuffle` (which only shuffles once per launch,
+not per loop). `DISPLAY` and `XAUTHORITY` are exported explicitly since the
+script runs from an autostart context rather than an interactive shell.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow.desktop` → deployed to `~/.config/autostart/slideshow.desktop`
