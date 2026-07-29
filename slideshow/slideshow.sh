@@ -17,7 +17,7 @@ while true; do
     mpv --fullscreen \
         --vo=x11 \
         --no-osc \
-        --image-display-duration=6 \
+        --image-display-duration=7 \
         --input-conf="$INPUT_CONF" \
         --playlist="$PLAYLIST" 2>&1 | \
     stdbuf -oL grep --line-buffered -iE '^Playing:|error|fail|warning|cannot|unsupported|invalid' | \
