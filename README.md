@@ -109,7 +109,13 @@ some HEIC files decode to an unexpected embedded thumbnail track, or a
 corrupt/unrecognized file fails to load outright -- without needing a
 terminal open to see them.
 
+LEFT/RIGHT arrow keys are bound to jump to the previous/next picture
+(`slideshow-input.conf`, passed via `--input-conf`), since by default mpv
+binds those keys to seeking within the current file rather than playlist
+navigation.
+
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
+- `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
 - `slideshow.desktop` → deployed to `~/.config/autostart/slideshow.desktop`
 
 ## Reinstalling from this repo
@@ -133,6 +139,7 @@ sudo systemctl enable boot-log.service
 mkdir -p ~/.config/autostart
 cp slideshow/slideshow.sh ~/.config/autostart/
 chmod 755 ~/.config/autostart/slideshow.sh
+cp slideshow/slideshow-input.conf ~/.config/autostart/
 cp slideshow/slideshow.desktop ~/.config/autostart/
 ```
 
