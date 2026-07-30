@@ -1,0 +1,12 @@
+[Unit]
+Description=NAT rules for PortraitAdBlock AP
+After=hostapd.service
+Requires=hostapd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ap-nat.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

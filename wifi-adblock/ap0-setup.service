@@ -1,0 +1,13 @@
+[Unit]
+Description=Create ap0 virtual AP interface for PortraitAdBlock
+After=NetworkManager.service
+Before=hostapd.service dnsmasq.service
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ap0-setup.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -164,6 +164,102 @@ sudo apt install jellyfin
 sudo systemctl enable --now jellyfin
 ```
 
+## wifi-adblock
+
+A second WiFi network (`PortraitAdBlock`) broadcast by this laptop, alongside
+(not instead of) the normal home network — join it from a phone/laptop to get
+DNS-level ad blocking, while the regular home WiFi stays completely untouched
+and unaffected by this laptop's power schedule.
+
+Architecture: a virtual interface (`ap0`) is added on top of the same WiFi
+radio used for the laptop's own connection, with `hostapd` broadcasting it as
+an access point. `dnsmasq` handles DHCP + DNS for devices that join — DNS
+queries for known ad/tracker domains (via a maintained hosts-format
+blocklist) resolve to nothing, so the ad slot just fails to load. `iptables`
+NAT routes traffic from the AP's clients out through the laptop's own WiFi
+connection to actually reach the internet.
+
+**Important hardware/regulatory constraint** that shaped this design: this
+machine's WiFi card can only transmit (broadcast/beacon) on the 2.4GHz band —
+5GHz is receive/client-only on this hardware (flagged `NO-IR`). On top of
+that, the card only supports running as an access point *and* a client at the
+same time if both share the exact same channel. That means the laptop's own
+WiFi connection has to be on the router's **2.4GHz** band specifically (not
+5GHz) — done by pinning the connection's BSSID to the router's 2.4GHz radio
+in NetworkManager (`nmcli connection modify <profile> 802-11-wireless.bssid
+<2.4ghz-bssid>`, found via `nmcli device wifi list`). That BSSID pin lives in
+the NetworkManager connection profile, not in this repo — it's specific to
+this router and isn't something a generic reinstall script should hardcode.
+
+- `hostapd.conf` → deployed to `/etc/hostapd/hostapd.conf`. **The
+  `wpa_passphrase` in this repo is a placeholder** (`CHANGE_ME_MIN_8_CHARS`)
+  — the real passphrase deployed on the machine is not tracked here on
+  purpose. Set your own before deploying.
+- `adblock-ap.conf` → deployed to `/etc/dnsmasq.d/adblock-ap.conf`.
+- `ap0-setup.sh` → deployed to `/usr/local/bin/ap0-setup.sh` (`755`);
+  recreates the `ap0` virtual interface and its static IP
+  (`192.168.50.1/24`) — virtual interfaces don't survive a reboot, so this
+  has to re-run on every boot.
+- `ap0-setup.service` → deployed to `/etc/systemd/system/ap0-setup.service`,
+  enabled. Runs before `hostapd`/`dnsmasq` so `ap0` exists first.
+- `hostapd-override.conf` / `dnsmasq-override.conf` → deployed to
+  `/etc/systemd/system/hostapd.service.d/override.conf` and
+  `/etc/systemd/system/dnsmasq.service.d/override.conf` — make those two
+  packaged services wait on `ap0-setup.service`.
+- `ap-nat.sh` → deployed to `/usr/local/bin/ap-nat.sh` (`755`); sets up NAT
+  (MASQUERADE + FORWARD rules) so `ap0` clients can reach the internet
+  through the laptop's own WiFi connection. Written idempotently (`-C` check
+  before `-A`) so it's safe to re-run.
+- `ap-nat.service` → deployed to `/etc/systemd/system/ap-nat.service`,
+  enabled, runs after `hostapd`.
+
+Not tracked in this repo (runtime data, not config): `/etc/dnsmasq_adblock_hosts`
+(the downloaded blocklist, ~97k entries from
+[StevenBlack/hosts](https://github.com/StevenBlack/hosts)) and IP forwarding
+(`net.ipv4.ip_forward=1`, dropped in `/etc/sysctl.d/99-ap-forward.conf`).
+
+To reproduce on a fresh install:
+```bash
+sudo apt install hostapd dnsmasq
+
+sudo iw dev wlp3s0 interface add ap0 type __ap
+echo '[keyfile]
+unmanaged-devices=interface-name:ap0' | sudo tee /etc/NetworkManager/conf.d/unmanaged-ap0.conf
+sudo nmcli device set ap0 managed no
+
+sudo cp wifi-adblock/hostapd.conf /etc/hostapd/hostapd.conf
+# then edit /etc/hostapd/hostapd.conf and set your own wpa_passphrase
+
+sudo curl -sSL https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts -o /etc/dnsmasq_adblock_hosts
+sudo cp wifi-adblock/adblock-ap.conf /etc/dnsmasq.d/adblock-ap.conf
+
+sudo cp wifi-adblock/ap0-setup.sh /usr/local/bin/ap0-setup.sh
+sudo chmod 755 /usr/local/bin/ap0-setup.sh
+sudo cp wifi-adblock/ap0-setup.service /etc/systemd/system/ap0-setup.service
+
+sudo mkdir -p /etc/systemd/system/hostapd.service.d /etc/systemd/system/dnsmasq.service.d
+sudo cp wifi-adblock/hostapd-override.conf /etc/systemd/system/hostapd.service.d/override.conf
+sudo cp wifi-adblock/dnsmasq-override.conf /etc/systemd/system/dnsmasq.service.d/override.conf
+
+sudo cp wifi-adblock/ap-nat.sh /usr/local/bin/ap-nat.sh
+sudo chmod 755 /usr/local/bin/ap-nat.sh
+sudo cp wifi-adblock/ap-nat.service /etc/systemd/system/ap-nat.service
+
+echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-ap-forward.conf
+sudo sysctl --system
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ap0-setup.service
+sudo systemctl enable --now hostapd
+sudo systemctl enable --now dnsmasq
+sudo systemctl enable --now ap-nat.service
+
+# pin your own WiFi connection to your router's 2.4GHz band (required, see above):
+# nmcli device wifi list
+# nmcli connection modify <profile> 802-11-wireless.bssid <2.4ghz-bssid>
+# nmcli connection up <profile>
+```
+
 ## Remote access (SSH)
 
 Used to administer the machine from another laptop (deploying/updating the
