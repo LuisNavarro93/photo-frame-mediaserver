@@ -114,8 +114,15 @@ LEFT/RIGHT arrow keys are bound to jump to the previous/next picture
 binds those keys to seeking within the current file rather than playlist
 navigation.
 
+A small `mpv` Lua script (`clock.lua`) draws the current date and time in
+the top-right corner via an OSD overlay, refreshed every second, so the
+frame doubles as a clock. It lives in mpv's scripts dir (auto-loaded) and is
+also passed explicitly with `--script` so the dependency is visible in
+`slideshow.sh`. Size/position/format are constants at the top of the file.
+
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
+- `clock.lua` → deployed to `~/.config/mpv/scripts/clock.lua` (`644`)
 - `slideshow.desktop` → deployed to `~/.config/autostart/slideshow.desktop`
 
 ## Reinstalling from this repo
@@ -141,6 +148,8 @@ cp slideshow/slideshow.sh ~/.config/autostart/
 chmod 755 ~/.config/autostart/slideshow.sh
 cp slideshow/slideshow-input.conf ~/.config/autostart/
 cp slideshow/slideshow.desktop ~/.config/autostart/
+mkdir -p ~/.config/mpv/scripts
+cp slideshow/clock.lua ~/.config/mpv/scripts/
 ```
 
 ## Jellyfin (not a script in this repo — reference only)

@@ -17,6 +17,7 @@ while true; do
     mpv --fullscreen \
         --vo=x11 \
         --no-osc \
+        --script=/home/portrait/.config/mpv/scripts/clock.lua \
         --image-display-duration=7 \
         --input-conf="$INPUT_CONF" \
         --playlist="$PLAYLIST" 2>&1 | \
