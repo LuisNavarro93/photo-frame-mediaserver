@@ -6,6 +6,15 @@ local utils = require "mp.utils"
 local obj_overlay = mp.create_osd_overlay("ass-events")
 obj_overlay.res_x = 1280   -- virtual canvas; mpv scales it to the real screen
 obj_overlay.res_y = 720
+obj_overlay.z = 1   -- draw above the backing box
+
+-- plain dark rectangle behind the clock/weather text, for contrast against
+-- bright photos. Sized just large enough for the current content (grows
+-- once weather has loaded), not a full-width bar.
+local obj_box_overlay = mp.create_osd_overlay("ass-events")
+obj_box_overlay.res_x = 1280
+obj_box_overlay.res_y = 720
+obj_box_overlay.z = 0
 
 -- clock
 local int_margin_x    = 65   -- gap from the right edge (incl. ~1cm extra left shift)
@@ -14,6 +23,14 @@ local int_date_size   = 38
 local int_time_size   = 68
 local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
+
+-- backing box
+local bool_box_enabled      = true
+local int_box_pad           = 18    -- padding around the text block
+local int_box_width         = 366   -- wide enough for the longest weather line
+local int_box_height_clock  = 176   -- height while only date/time are shown
+local int_box_height_full   = 356   -- height once weather + tomorrow are shown
+local str_box_alpha         = "&H55&"  -- ASS alpha: 00 opaque .. FF transparent
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 local bool_weather_enabled  = true
@@ -98,7 +115,25 @@ local function build_weather_block()
     return str_now .. str_tomorrow
 end
 
+local function draw_box(bool_full)
+    if not bool_box_enabled then
+        obj_box_overlay.data = ""
+        obj_box_overlay:update()
+        return
+    end
+    local int_height = bool_full and int_box_height_full or int_box_height_clock
+    local int_box_x = (obj_overlay.res_x - int_margin_x) + int_box_pad
+    local int_box_y = int_offset_down - int_box_pad
+    obj_box_overlay.data = string.format(
+        "{\\an9\\pos(%d,%d)\\1c&H000000&\\alpha%s\\bord0\\shad0\\p1}" ..
+        "m 0 0 l %d 0 l %d %d l 0 %d",
+        int_box_x, int_box_y, str_box_alpha,
+        int_box_width, int_box_width, int_height, int_height)
+    obj_box_overlay:update()
+end
+
 local function update()
+    draw_box(bool_weather_enabled and obj_weather.bool_loaded)
     local str_date = os.date(str_date_format)
     local str_time = os.date(str_time_format)
 

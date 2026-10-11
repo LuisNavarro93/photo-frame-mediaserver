@@ -132,6 +132,11 @@ icons. Location (`str_weather_lat`/`str_weather_lon`, currently Merida,
 Yucatan) and units (`temperature_unit`/`wind_speed_unit` in the request
 URL, currently Celsius/km-h) are constants near the top of `clock.lua`.
 
+A second, lower OSD overlay draws a plain semi-transparent dark rectangle
+behind the whole block for contrast against bright photos -- sized to the
+content (`int_box_height_clock` before weather has loaded, taller
+`int_box_height_full` once it has) rather than a full-width bar.
+
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
 - `clock.lua` → deployed to `~/.config/mpv/scripts/clock.lua` (`644`)
