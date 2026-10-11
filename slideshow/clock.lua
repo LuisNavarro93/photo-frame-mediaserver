@@ -9,8 +9,9 @@ obj_overlay.res_y = 720
 obj_overlay.z = 1   -- draw above the backing box
 
 -- plain dark rectangle behind the clock/weather text, for contrast against
--- bright photos. Sized just large enough for the current content (grows
--- once weather has loaded), not a full-width bar.
+-- bright photos. Sized to the actual content each redraw (longest line's
+-- width, sum of the lines' heights) rather than a fixed guess -- see
+-- measure_width()/draw_box() below.
 local obj_box_overlay = mp.create_osd_overlay("ass-events")
 obj_box_overlay.res_x = 1280
 obj_box_overlay.res_y = 720
@@ -25,13 +26,18 @@ local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
 
 -- backing box
-local bool_box_enabled      = true
-local int_box_pad_x         = 18    -- horizontal padding (box extends past text)
-local int_box_pad_y         = 4     -- vertical padding, kept tight to the text
-local int_box_width         = 366   -- wide enough for the longest weather line
-local int_box_height_clock  = 130   -- height while only date/time are shown
-local int_box_height_full   = 280   -- height once weather + tomorrow are shown
-local str_box_alpha         = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
+local bool_box_enabled = true
+-- mpv/libass expose no real text-measurement API, so the box is sized from
+-- an average-glyph-width heuristic (calibrated for the bold sans the OSD
+-- falls back to) rather than a pixel-exact metric.
+local num_char_width_ratio  = 0.58   -- average glyph advance, as a fraction of font size
+local num_line_height_ratio = 1.15   -- line pitch, as a multiple of font size
+-- Small overflow allowance for the text's own \bord/\shad strokes, which
+-- extend a few units past the glyphs' nominal advance box -- not general
+-- padding, just enough that the outline/shadow isn't clipped by the box edge.
+local int_box_pad_x = 3
+local int_box_pad_y = 2
+local str_box_alpha = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 local bool_weather_enabled  = true
@@ -95,62 +101,98 @@ end
 
 local obj_weather = { bool_loaded = false }
 
-local function build_weather_block()
-    if not (bool_weather_enabled and obj_weather.bool_loaded) then
-        return ""
+-- Number of Unicode codepoints in str_text (not bytes -- multi-byte glyphs
+-- like deg/weather symbols must count as one "character").
+local function count_chars(str_text)
+    local int_count = 0
+    for _ in str_text:gmatch("[%z\1-\127\194-\253][\128-\191]*") do
+        int_count = int_count + 1
     end
-    local str_now = string.format(
-        "{\\fs%d}%s %d\194\176  %s\\N" ..
-        "{\\fs%d}Feels %d\194\176 \194\183 H %d\194\176 L %d\194\176\\N" ..
-        "{\\fs%d}%d%% hum \194\183 %d km/h wind",
-        int_weather_size, obj_weather.str_glyph, obj_weather.int_temp, obj_weather.str_condition,
-        int_weather_sub_size, obj_weather.int_feels, obj_weather.int_hi, obj_weather.int_lo,
-        int_weather_sub_size, obj_weather.int_humidity, obj_weather.int_wind)
-
-    local str_tomorrow = string.format(
-        "\\N{\\fs%d}TOMORROW\\N{\\fs%d}%s %d\194\176 / %d\194\176  %s",
-        int_label_size,
-        int_weather_sub_size, obj_weather.str_tomorrow_glyph,
-        obj_weather.int_tomorrow_hi, obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition)
-
-    return str_now .. str_tomorrow
+    return int_count
 end
 
-local function draw_box(bool_full)
+local function measure_width(str_text, int_size)
+    return count_chars(str_text) * int_size * num_char_width_ratio
+end
+
+-- One entry per on-screen line: the plain text (for width measurement) and
+-- its font size (for both width and line-height). Built fresh each redraw
+-- so the box always matches what's actually being shown.
+local function build_lines()
+    local lst_lines = {
+        { str = os.date(str_date_format), size = int_date_size },
+        { str = os.date(str_time_format), size = int_time_size },
+    }
+    if bool_weather_enabled and obj_weather.bool_loaded then
+        table.insert(lst_lines, {
+            size = int_weather_size,
+            str = string.format("%s %d\194\176  %s",
+                obj_weather.str_glyph, obj_weather.int_temp, obj_weather.str_condition),
+        })
+        table.insert(lst_lines, {
+            size = int_weather_sub_size,
+            str = string.format("Feels %d\194\176 \194\183 H %d\194\176 L %d\194\176",
+                obj_weather.int_feels, obj_weather.int_hi, obj_weather.int_lo),
+        })
+        table.insert(lst_lines, {
+            size = int_weather_sub_size,
+            str = string.format("%d%% hum \194\183 %d km/h wind",
+                obj_weather.int_humidity, obj_weather.int_wind),
+        })
+        table.insert(lst_lines, { size = int_label_size, str = "TOMORROW" })
+        table.insert(lst_lines, {
+            size = int_weather_sub_size,
+            str = string.format("%s %d\194\176 / %d\194\176  %s",
+                obj_weather.str_tomorrow_glyph, obj_weather.int_tomorrow_hi,
+                obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition),
+        })
+    end
+    return lst_lines
+end
+
+local function draw_box(lst_lines)
     if not bool_box_enabled then
         obj_box_overlay.data = ""
         obj_box_overlay:update()
         return
     end
-    local int_height = bool_full and int_box_height_full or int_box_height_clock
+
+    local int_width = 0
+    local int_height = 0
+    for _, obj_line in ipairs(lst_lines) do
+        local int_line_width = measure_width(obj_line.str, obj_line.size)
+        if int_line_width > int_width then
+            int_width = int_line_width
+        end
+        int_height = int_height + obj_line.size * num_line_height_ratio
+    end
+    int_width = int_width + 2 * int_box_pad_x
+    int_height = int_height + 2 * int_box_pad_y
+
     local int_box_x = (obj_overlay.res_x - int_margin_x) + int_box_pad_x
     local int_box_y = int_offset_down - int_box_pad_y
     obj_box_overlay.data = string.format(
         "{\\an9\\pos(%d,%d)\\1c&H000000&\\alpha%s\\bord0\\shad0\\p1}" ..
         "m 0 0 l %d 0 l %d %d l 0 %d",
         int_box_x, int_box_y, str_box_alpha,
-        int_box_width, int_box_width, int_height, int_height)
+        int_width, int_width, int_height, int_height)
     obj_box_overlay:update()
 end
 
 local function update()
-    draw_box(bool_weather_enabled and obj_weather.bool_loaded)
-    local str_date = os.date(str_date_format)
-    local str_time = os.date(str_time_format)
+    local lst_lines = build_lines()
+    draw_box(lst_lines)
 
-    -- \an9 = anchor top-right; white fill, black outline so it reads on any photo.
-    local str_body = string.format(
-        "{\\an9\\pos(%d,%d)\\b1\\bord2.5\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&}" ..
-        "{\\fs%d}%s\\N{\\fs%d}%s",
-        obj_overlay.res_x - int_margin_x, int_offset_down,
-        int_date_size, str_date, int_time_size, str_time)
-
-    local str_weather = build_weather_block()
-    if str_weather ~= "" then
-        str_body = str_body .. "\\N" .. str_weather
+    local lst_parts = {}
+    for _, obj_line in ipairs(lst_lines) do
+        table.insert(lst_parts, string.format("{\\fs%d}%s", obj_line.size, obj_line.str))
     end
 
-    obj_overlay.data = str_body
+    -- \an9 = anchor top-right; white fill, black outline so it reads on any photo.
+    obj_overlay.data = string.format(
+        "{\\an9\\pos(%d,%d)\\b1\\bord2.5\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&}%s",
+        obj_overlay.res_x - int_margin_x, int_offset_down,
+        table.concat(lst_parts, "\\N"))
     obj_overlay:update()
 end
 
