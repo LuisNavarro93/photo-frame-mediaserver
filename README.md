@@ -132,14 +132,20 @@ icons. Location (`str_weather_lat`/`str_weather_lon`, currently Merida,
 Yucatan) and units (`temperature_unit`/`wind_speed_unit` in the request
 URL, currently Celsius/km-h) are constants near the top of `clock.lua`.
 
-A second, lower OSD overlay draws a plain semi-transparent dark rectangle
-behind the whole block for contrast against bright photos, sized from the
-actual content on every redraw rather than a fixed guess: its width is the
-widest line's estimated width, its height the sum of each line's height.
-mpv/libass expose no real text-measurement API, so width comes from an
-average-glyph-width heuristic (`num_char_width_ratio`) rather than a
-pixel-exact metric; `int_box_pad_x`/`int_box_pad_y` are a small overflow
-allowance for the text's own outline/shadow strokes, not general padding.
+A second, lower OSD overlay draws a rounded "pill badge" chip behind
+*each* line (date, time, and every weather line) rather than one shared
+box, sized to that line's own content -- a short line like `TOMORROW` gets
+a small chip, `Feels 31° · H 33° L 25°` a wide one.
+mpv/libass expose no real text-measurement API, so chip width comes from
+an average-glyph-width heuristic (`num_char_width_ratio`) rather than a
+pixel-exact metric. All chips are one multi-shape ASS vector path
+(cubic-bezier rounded corners) in a single overlay, right-aligned to the
+same edge as the text. A thin, chip-less spacer line is interleaved
+between every pair of real lines (`int_gap_size`) so the gap between
+chips is real vertical space that both the text's `\N` stack and the
+chips' own cursor advance through identically -- the only way to keep
+per-line chips from drifting out of sync with the text without a real
+text-metrics API to measure either one against.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)

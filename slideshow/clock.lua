@@ -6,12 +6,13 @@ local utils = require "mp.utils"
 local obj_overlay = mp.create_osd_overlay("ass-events")
 obj_overlay.res_x = 1280   -- virtual canvas; mpv scales it to the real screen
 obj_overlay.res_y = 720
-obj_overlay.z = 1   -- draw above the backing box
+obj_overlay.z = 1   -- draw above the backing chips
 
--- plain dark rectangle behind the clock/weather text, for contrast against
--- bright photos. Sized to the actual content each redraw (longest line's
--- width, sum of the lines' heights) rather than a fixed guess -- see
--- measure_width()/draw_box() below.
+-- a soft rounded "pill badge" chip behind every line (date, time, each
+-- weather line), for contrast against bright photos. Each chip is sized to
+-- its own line (longest line = widest chip, not a single shared box), and
+-- all of them are drawn as one multi-shape ASS vector path in a single
+-- lower-z overlay.
 local obj_box_overlay = mp.create_osd_overlay("ass-events")
 obj_box_overlay.res_x = 1280
 obj_box_overlay.res_y = 720
@@ -25,19 +26,23 @@ local int_time_size   = 68
 local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
 
--- backing box
+-- pill chips
 local bool_box_enabled = true
--- mpv/libass expose no real text-measurement API, so the box is sized from
+-- mpv/libass expose no real text-measurement API, so chip size comes from
 -- an average-glyph-width heuristic (calibrated for the bold sans the OSD
--- falls back to) rather than a pixel-exact metric.
+-- falls back to) rather than a pixel-exact metric. The same
+-- num_line_height_ratio is used to advance both the text's \N stack and
+-- the chips' own vertical cursor, so they can't drift apart from each
+-- other even though neither is a real font-metrics value.
 local num_char_width_ratio  = 0.58   -- average glyph advance, as a fraction of font size
 local num_line_height_ratio = 1.15   -- line pitch, as a multiple of font size
--- Small overflow allowance for the text's own \bord/\shad strokes, which
--- extend a few units past the glyphs' nominal advance box -- not general
--- padding, just enough that the outline/shadow isn't clipped by the box edge.
-local int_box_pad_x = 3
-local int_box_pad_y = 2
-local str_box_alpha = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
+local int_chip_pad_x = 10   -- horizontal breathing room inside each chip
+local int_chip_pad_y = 5    -- vertical breathing room inside each chip
+local int_gap_size   = 16   -- font-size-equivalent of the blank line between
+                             -- chips -- real (if invisible) text, so the gap
+                             -- advances the \N stack exactly like any other
+                             -- line and can't desync from the chips below it
+local str_box_alpha  = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 local bool_weather_enabled  = true
@@ -115,39 +120,73 @@ local function measure_width(str_text, int_size)
     return count_chars(str_text) * int_size * num_char_width_ratio
 end
 
--- One entry per on-screen line: the plain text (for width measurement) and
--- its font size (for both width and line-height). Built fresh each redraw
--- so the box always matches what's actually being shown.
+-- One entry per on-screen line: its text (for width measurement, empty for
+-- spacers), its font size (for both width and line pitch) and whether it
+-- gets its own pill chip. A thin, chip-less spacer line is interleaved
+-- between every pair of real lines so the gap between chips is real (if
+-- invisible) vertical space that both the text and the chips advance
+-- through identically.
 local function build_lines()
-    local lst_lines = {
+    local lst_raw = {
         { str = os.date(str_date_format), size = int_date_size },
         { str = os.date(str_time_format), size = int_time_size },
     }
     if bool_weather_enabled and obj_weather.bool_loaded then
-        table.insert(lst_lines, {
+        table.insert(lst_raw, {
             size = int_weather_size,
             str = string.format("%s %d\194\176  %s",
                 obj_weather.str_glyph, obj_weather.int_temp, obj_weather.str_condition),
         })
-        table.insert(lst_lines, {
+        table.insert(lst_raw, {
             size = int_weather_sub_size,
             str = string.format("Feels %d\194\176 \194\183 H %d\194\176 L %d\194\176",
                 obj_weather.int_feels, obj_weather.int_hi, obj_weather.int_lo),
         })
-        table.insert(lst_lines, {
+        table.insert(lst_raw, {
             size = int_weather_sub_size,
             str = string.format("%d%% hum \194\183 %d km/h wind",
                 obj_weather.int_humidity, obj_weather.int_wind),
         })
-        table.insert(lst_lines, { size = int_label_size, str = "TOMORROW" })
-        table.insert(lst_lines, {
+        table.insert(lst_raw, { size = int_label_size, str = "TOMORROW" })
+        table.insert(lst_raw, {
             size = int_weather_sub_size,
             str = string.format("%s %d\194\176 / %d\194\176  %s",
                 obj_weather.str_tomorrow_glyph, obj_weather.int_tomorrow_hi,
                 obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition),
         })
     end
+
+    local lst_lines = {}
+    for int_i, obj_line in ipairs(lst_raw) do
+        if int_i > 1 then
+            table.insert(lst_lines, { str = "", size = int_gap_size, bool_chip = false })
+        end
+        obj_line.bool_chip = true
+        table.insert(lst_lines, obj_line)
+    end
     return lst_lines
+end
+
+local function fmt_num(num_value)
+    return string.format("%.1f", num_value)
+end
+
+-- A rounded-rect ASS draw path (cubic-bezier corners), in local coordinates
+-- with its own top-left at (int_origin_x, int_origin_y).
+local function rounded_rect_path(int_origin_x, int_origin_y, int_w, int_h, int_r)
+    local num_k = int_r * 0.5523
+    local function pt(num_x, num_y)
+        return fmt_num(int_origin_x + num_x) .. " " .. fmt_num(int_origin_y + num_y)
+    end
+    return "m " .. pt(int_r, 0) ..
+        " l " .. pt(int_w - int_r, 0) ..
+        " b " .. pt(int_w - int_r + num_k, 0) .. " " .. pt(int_w, int_r - num_k) .. " " .. pt(int_w, int_r) ..
+        " l " .. pt(int_w, int_h - int_r) ..
+        " b " .. pt(int_w, int_h - int_r + num_k) .. " " .. pt(int_w - int_r + num_k, int_h) .. " " .. pt(int_w - int_r, int_h) ..
+        " l " .. pt(int_r, int_h) ..
+        " b " .. pt(int_r - num_k, int_h) .. " " .. pt(0, int_h - int_r + num_k) .. " " .. pt(0, int_h - int_r) ..
+        " l " .. pt(0, int_r) ..
+        " b " .. pt(0, int_r - num_k) .. " " .. pt(int_r - num_k, 0) .. " " .. pt(int_r, 0)
 end
 
 local function draw_box(lst_lines)
@@ -157,25 +196,34 @@ local function draw_box(lst_lines)
         return
     end
 
-    local int_width = 0
-    local int_height = 0
+    local lst_chips = {}
+    local int_max_width = 0
+    local int_cursor_y = 0
     for _, obj_line in ipairs(lst_lines) do
-        local int_line_width = measure_width(obj_line.str, obj_line.size)
-        if int_line_width > int_width then
-            int_width = int_line_width
+        local int_line_h = obj_line.size * num_line_height_ratio
+        if obj_line.bool_chip then
+            local int_chip_w = measure_width(obj_line.str, obj_line.size) + 2 * int_chip_pad_x
+            local int_chip_h = int_line_h + 2 * int_chip_pad_y
+            table.insert(lst_chips, { w = int_chip_w, h = int_chip_h, y = int_cursor_y - int_chip_pad_y })
+            if int_chip_w > int_max_width then
+                int_max_width = int_chip_w
+            end
         end
-        int_height = int_height + obj_line.size * num_line_height_ratio
+        int_cursor_y = int_cursor_y + int_line_h
     end
-    int_width = int_width + 2 * int_box_pad_x
-    int_height = int_height + 2 * int_box_pad_y
 
-    local int_box_x = (obj_overlay.res_x - int_margin_x) + int_box_pad_x
-    local int_box_y = int_offset_down - int_box_pad_y
+    local lst_paths = {}
+    for _, obj_chip in ipairs(lst_chips) do
+        local int_radius = obj_chip.h / 2  -- fully rounded ends, true "pill" shape
+        local int_origin_x = int_max_width - obj_chip.w  -- right-align every chip
+        table.insert(lst_paths, rounded_rect_path(int_origin_x, obj_chip.y, obj_chip.w, obj_chip.h, int_radius))
+    end
+
+    local int_box_x = (obj_overlay.res_x - int_margin_x) + int_chip_pad_x
+    local int_box_y = int_offset_down
     obj_box_overlay.data = string.format(
-        "{\\an9\\pos(%d,%d)\\1c&H000000&\\alpha%s\\bord0\\shad0\\p1}" ..
-        "m 0 0 l %d 0 l %d %d l 0 %d",
-        int_box_x, int_box_y, str_box_alpha,
-        int_width, int_width, int_height, int_height)
+        "{\\an9\\pos(%d,%d)\\1c&H000000&\\alpha%s\\bord0\\shad0\\p1}%s",
+        int_box_x, int_box_y, str_box_alpha, table.concat(lst_paths, " "))
     obj_box_overlay:update()
 end
 
