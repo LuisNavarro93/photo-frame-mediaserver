@@ -26,11 +26,12 @@ local str_time_format = "%H:%M"
 
 -- backing box
 local bool_box_enabled      = true
-local int_box_pad           = 18    -- padding around the text block
+local int_box_pad_x         = 18    -- horizontal padding (box extends past text)
+local int_box_pad_y         = 4     -- vertical padding, kept tight to the text
 local int_box_width         = 366   -- wide enough for the longest weather line
-local int_box_height_clock  = 176   -- height while only date/time are shown
-local int_box_height_full   = 356   -- height once weather + tomorrow are shown
-local str_box_alpha         = "&H55&"  -- ASS alpha: 00 opaque .. FF transparent
+local int_box_height_clock  = 130   -- height while only date/time are shown
+local int_box_height_full   = 280   -- height once weather + tomorrow are shown
+local str_box_alpha         = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 local bool_weather_enabled  = true
@@ -107,7 +108,7 @@ local function build_weather_block()
         int_weather_sub_size, obj_weather.int_humidity, obj_weather.int_wind)
 
     local str_tomorrow = string.format(
-        "\\N{\\fs10}\\N{\\fs%d}TOMORROW\\N{\\fs%d}%s %d\194\176 / %d\194\176  %s",
+        "\\N{\\fs%d}TOMORROW\\N{\\fs%d}%s %d\194\176 / %d\194\176  %s",
         int_label_size,
         int_weather_sub_size, obj_weather.str_tomorrow_glyph,
         obj_weather.int_tomorrow_hi, obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition)
@@ -122,8 +123,8 @@ local function draw_box(bool_full)
         return
     end
     local int_height = bool_full and int_box_height_full or int_box_height_clock
-    local int_box_x = (obj_overlay.res_x - int_margin_x) + int_box_pad
-    local int_box_y = int_offset_down - int_box_pad
+    local int_box_x = (obj_overlay.res_x - int_margin_x) + int_box_pad_x
+    local int_box_y = int_offset_down - int_box_pad_y
     obj_box_overlay.data = string.format(
         "{\\an9\\pos(%d,%d)\\1c&H000000&\\alpha%s\\bord0\\shad0\\p1}" ..
         "m 0 0 l %d 0 l %d %d l 0 %d",
