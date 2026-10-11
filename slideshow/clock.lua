@@ -8,10 +8,10 @@ obj_overlay.res_x = 1280   -- virtual canvas; mpv scales it to the real screen
 obj_overlay.res_y = 720
 
 -- clock
-local int_margin_x    = 24   -- gap from the right edge
+local int_margin_x    = 65   -- gap from the right edge (incl. ~1cm extra left shift)
 local int_offset_down = 70   -- how far below the top corner to sit (~8% of height)
-local int_date_size   = 30
-local int_time_size   = 54
+local int_date_size   = 38
+local int_time_size   = 68
 local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
 
@@ -21,9 +21,9 @@ local str_weather_lat       = "20.9674"   -- Merida, Yucatan, Mexico
 local str_weather_lon       = "-89.5926"
 local str_weather_tz_param  = "America%2FMerida"  -- URL-encoded timezone
 local int_weather_refresh_s = 1800  -- re-fetch every 30 min
-local int_weather_size      = 28    -- current temp + condition line
-local int_weather_sub_size  = 20    -- feels-like / hi-lo / humidity / wind
-local int_label_size        = 16    -- "TOMORROW" label
+local int_weather_size      = 35    -- current temp + condition line
+local int_weather_sub_size  = 25    -- feels-like / hi-lo / humidity / wind
+local int_label_size        = 20    -- "TOMORROW" label
 
 local str_weather_url = string.format(
     "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s" ..
