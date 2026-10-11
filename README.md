@@ -140,12 +140,15 @@ mpv/libass expose no real text-measurement API, so chip width comes from
 an average-glyph-width heuristic (`num_char_width_ratio`) rather than a
 pixel-exact metric. All chips are one multi-shape ASS vector path
 (cubic-bezier rounded corners) in a single overlay, right-aligned to the
-same edge as the text. A thin, chip-less spacer line is interleaved
-between every pair of real lines (`int_gap_size`) so the gap between
-chips is real vertical space that both the text's `\N` stack and the
-chips' own cursor advance through identically -- the only way to keep
-per-line chips from drifting out of sync with the text without a real
-text-metrics API to measure either one against.
+same edge as the text. Each chip is shaved `int_chip_gap` units shorter than its own
+`num_line_height_ratio`-based line slot and centered in it, rather than
+an earlier version that tried to add an invisible blank `\N` line
+between chips for the gap -- its real rendered height didn't match what
+the chip math assumed, so the chips drifted further from their text with
+every line (fine for the first few, visibly empty chips by the last one).
+Shrinking each chip within the one cumulative-height step already
+validated against real `\N` layout avoids introducing that new,
+unverifiable unknown.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)

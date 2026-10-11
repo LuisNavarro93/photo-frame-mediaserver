@@ -37,11 +37,12 @@ local bool_box_enabled = true
 local num_char_width_ratio  = 0.58   -- average glyph advance, as a fraction of font size
 local num_line_height_ratio = 1.15   -- line pitch, as a multiple of font size
 local int_chip_pad_x = 10   -- horizontal breathing room inside each chip
-local int_chip_pad_y = 5    -- vertical breathing room inside each chip
-local int_gap_size   = 16   -- font-size-equivalent of the blank line between
-                             -- chips -- real (if invisible) text, so the gap
-                             -- advances the \N stack exactly like any other
-                             -- line and can't desync from the chips below it
+local int_chip_gap   = 4    -- shaved off each chip's own line-height slot and
+                             -- centered, rather than added as extra height --
+                             -- an extra (even blank) line's real rendered
+                             -- height isn't something we can predict, so the
+                             -- chips use only the same num_line_height_ratio
+                             -- step already validated against real \N layout
 local str_box_alpha  = "&HCC&"  -- ASS alpha: 00 opaque .. FF transparent (80% transparent)
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
@@ -120,49 +121,36 @@ local function measure_width(str_text, int_size)
     return count_chars(str_text) * int_size * num_char_width_ratio
 end
 
--- One entry per on-screen line: its text (for width measurement, empty for
--- spacers), its font size (for both width and line pitch) and whether it
--- gets its own pill chip. A thin, chip-less spacer line is interleaved
--- between every pair of real lines so the gap between chips is real (if
--- invisible) vertical space that both the text and the chips advance
--- through identically.
+-- One entry per on-screen line: its text (for width measurement) and its
+-- font size (for both width and line pitch).
 local function build_lines()
-    local lst_raw = {
+    local lst_lines = {
         { str = os.date(str_date_format), size = int_date_size },
         { str = os.date(str_time_format), size = int_time_size },
     }
     if bool_weather_enabled and obj_weather.bool_loaded then
-        table.insert(lst_raw, {
+        table.insert(lst_lines, {
             size = int_weather_size,
             str = string.format("%s %d\194\176  %s",
                 obj_weather.str_glyph, obj_weather.int_temp, obj_weather.str_condition),
         })
-        table.insert(lst_raw, {
+        table.insert(lst_lines, {
             size = int_weather_sub_size,
             str = string.format("Feels %d\194\176 \194\183 H %d\194\176 L %d\194\176",
                 obj_weather.int_feels, obj_weather.int_hi, obj_weather.int_lo),
         })
-        table.insert(lst_raw, {
+        table.insert(lst_lines, {
             size = int_weather_sub_size,
             str = string.format("%d%% hum \194\183 %d km/h wind",
                 obj_weather.int_humidity, obj_weather.int_wind),
         })
-        table.insert(lst_raw, { size = int_label_size, str = "TOMORROW" })
-        table.insert(lst_raw, {
+        table.insert(lst_lines, { size = int_label_size, str = "TOMORROW" })
+        table.insert(lst_lines, {
             size = int_weather_sub_size,
             str = string.format("%s %d\194\176 / %d\194\176  %s",
                 obj_weather.str_tomorrow_glyph, obj_weather.int_tomorrow_hi,
                 obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition),
         })
-    end
-
-    local lst_lines = {}
-    for int_i, obj_line in ipairs(lst_raw) do
-        if int_i > 1 then
-            table.insert(lst_lines, { str = "", size = int_gap_size, bool_chip = false })
-        end
-        obj_line.bool_chip = true
-        table.insert(lst_lines, obj_line)
     end
     return lst_lines
 end
@@ -201,13 +189,11 @@ local function draw_box(lst_lines)
     local int_cursor_y = 0
     for _, obj_line in ipairs(lst_lines) do
         local int_line_h = obj_line.size * num_line_height_ratio
-        if obj_line.bool_chip then
-            local int_chip_w = measure_width(obj_line.str, obj_line.size) + 2 * int_chip_pad_x
-            local int_chip_h = int_line_h + 2 * int_chip_pad_y
-            table.insert(lst_chips, { w = int_chip_w, h = int_chip_h, y = int_cursor_y - int_chip_pad_y })
-            if int_chip_w > int_max_width then
-                int_max_width = int_chip_w
-            end
+        local int_chip_w = measure_width(obj_line.str, obj_line.size) + 2 * int_chip_pad_x
+        local int_chip_h = int_line_h - int_chip_gap
+        table.insert(lst_chips, { w = int_chip_w, h = int_chip_h, y = int_cursor_y + int_chip_gap / 2 })
+        if int_chip_w > int_max_width then
+            int_max_width = int_chip_w
         end
         int_cursor_y = int_cursor_y + int_line_h
     end
