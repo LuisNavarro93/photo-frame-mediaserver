@@ -120,17 +120,23 @@ frame doubles as a clock. It lives in mpv's scripts dir (auto-loaded) and is
 also passed explicitly with `--script` so the dependency is visible in
 `slideshow.sh`. Size/position/format are constants at the top of the file.
 
-Below the clock, the same script draws current conditions and tomorrow's
-forecast -- temperature, condition, feels-like, daily high/low, humidity,
-wind -- fetched from [Open-Meteo](https://open-meteo.com) (free, no API
-key) via `curl`, re-fetched every 30 minutes on a non-blocking
+Below the clock, the same script draws an icon-forward summary: today's
+condition icon and daily low–high lead, with a "Rain from <hour>" line
+underneath when rain is actually expected; tomorrow trails as a single
+small line (icon, low–high, rain hour), entirely omitted on a dry
+tomorrow rather than just dropping its rain mention. "Rain start" is the
+first hour (scanning forward from local midnight) where Open-Meteo's
+hourly `precipitation_probability` crosses `int_rain_threshold` (50%).
+Data -- daily high/low/condition plus the hourly probability array --
+comes from [Open-Meteo](https://open-meteo.com) (free, no API key) via
+`curl`, re-fetched every 30 minutes on a non-blocking
 `mp.command_native_async` subprocess call so a slow/failed request never
 stalls playback. Condition icons are plain Unicode glyphs (not color
 emoji), chosen so they inherit the clock's white-fill/black-outline style
 via `libass`'s normal font-fallback instead of needing hand-drawn vector
 icons. Location (`str_weather_lat`/`str_weather_lon`, currently Merida,
-Yucatan) and units (`temperature_unit`/`wind_speed_unit` in the request
-URL, currently Celsius/km-h) are constants near the top of `clock.lua`.
+Yucatan) and units (`temperature_unit` in the request URL, currently
+Celsius) are constants near the top of `clock.lua`.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)

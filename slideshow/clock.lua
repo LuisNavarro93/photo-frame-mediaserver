@@ -1,5 +1,5 @@
--- Draws a date/clock, and current + tomorrow's weather, in the top-right
--- corner of the mpv window during the slideshow.
+-- Draws a date/clock, and an icon-forward today/tomorrow weather summary,
+-- in the top-right corner of the mpv window during the slideshow.
 local mp = require "mp"
 local utils = require "mp.utils"
 
@@ -16,24 +16,29 @@ local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
+-- "Icon-forward hero" layout: today's icon + daily low-high lead, with a
+-- rain-start time below (omitted entirely on a dry day); tomorrow trails
+-- as a single small line, also omitted entirely if tomorrow stays dry.
 local bool_weather_enabled  = true
 local str_weather_lat       = "20.9674"   -- Merida, Yucatan, Mexico
 local str_weather_lon       = "-89.5926"
 local str_weather_tz_param  = "America%2FMerida"  -- URL-encoded timezone
 local int_weather_refresh_s = 1800  -- re-fetch every 30 min
-local int_weather_size      = 35    -- current temp + condition line
-local int_weather_sub_size  = 25    -- feels-like / hi-lo / humidity / wind
-local int_label_size        = 20    -- "TOMORROW" label
+local int_hero_size         = 50    -- today's icon + low-high line
+local int_rain_size         = 24    -- "Rain from ..." line
+local int_tomorrow_size     = 22    -- trailing tomorrow line
+local int_rain_threshold    = 50    -- precipitation_probability %% that counts as "rain"
 
 local str_weather_url = string.format(
     "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s" ..
-    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day" ..
     "&daily=temperature_2m_max,temperature_2m_min,weather_code" ..
-    "&timezone=%s&forecast_days=2&temperature_unit=celsius&wind_speed_unit=kmh",
+    "&hourly=precipitation_probability" ..
+    "&timezone=%s&forecast_days=2&temperature_unit=celsius",
     str_weather_lat, str_weather_lon, str_weather_tz_param)
 
 -- WMO weather code -> {condition text, glyph}. Glyphs are plain Unicode
 -- symbols (not color emoji) so they inherit the clock's fill/outline color.
+-- These are daily (whole-day) codes, so there's no day/night variant here.
 local dict_wmo = {
     [0]  = {"Clear",            "\226\152\128"},  -- ☀
     [1]  = {"Mostly Clear",     "\226\155\133"},  -- ⛅
@@ -64,15 +69,33 @@ local dict_wmo = {
     [96] = {"Thunderstorm",     "\226\152\148"},
     [99] = {"Thunderstorm",     "\226\152\148"},
 }
-local str_moon_glyph = "\226\152\190"  -- ☾
 
-local function wx_lookup(int_code, int_is_day)
+local function wx_lookup_daily(int_code)
     local tup_entry = dict_wmo[int_code] or {"\226\128\148", "\226\152\129"}
-    local str_cond, str_glyph = tup_entry[1], tup_entry[2]
-    if int_code == 0 and int_is_day == 0 then
-        str_glyph = str_moon_glyph
+    return tup_entry[1], tup_entry[2]
+end
+
+-- First hour (0-23), scanning forward from local midnight, whose
+-- precipitation_probability crosses int_rain_threshold. arr_probs is the
+-- full 48-entry hourly array (today's 24 hours then tomorrow's);
+-- int_day_offset is 0 for today, 24 for tomorrow. Returns nil on a dry day.
+local function rain_start_hour(arr_probs, int_day_offset)
+    for int_h = 0, 23 do
+        local num_prob = arr_probs[int_day_offset + int_h + 1]
+        if num_prob and num_prob >= int_rain_threshold then
+            return int_h
+        end
     end
-    return str_cond, str_glyph
+    return nil
+end
+
+local function fmt_hour12(int_h)
+    local int_h12 = int_h % 12
+    if int_h12 == 0 then
+        int_h12 = 12
+    end
+    local str_ampm = (int_h < 12) and "AM" or "PM"
+    return int_h12 .. " " .. str_ampm
 end
 
 local obj_weather = { bool_loaded = false }
@@ -85,27 +108,24 @@ local function build_lines()
     }
     if bool_weather_enabled and obj_weather.bool_loaded then
         table.insert(lst_lines, {
-            size = int_weather_size,
-            str = string.format("%s %d\194\176  %s",
-                obj_weather.str_glyph, obj_weather.int_temp, obj_weather.str_condition),
+            size = int_hero_size,
+            str = string.format("%s %d\194\176\226\128\147%d\194\176",
+                obj_weather.str_today_glyph, obj_weather.int_today_lo, obj_weather.int_today_hi),
         })
-        table.insert(lst_lines, {
-            size = int_weather_sub_size,
-            str = string.format("Feels %d\194\176 \194\183 H %d\194\176 L %d\194\176",
-                obj_weather.int_feels, obj_weather.int_hi, obj_weather.int_lo),
-        })
-        table.insert(lst_lines, {
-            size = int_weather_sub_size,
-            str = string.format("%d%% hum \194\183 %d km/h wind",
-                obj_weather.int_humidity, obj_weather.int_wind),
-        })
-        table.insert(lst_lines, { size = int_label_size, str = "TOMORROW" })
-        table.insert(lst_lines, {
-            size = int_weather_sub_size,
-            str = string.format("%s %d\194\176 / %d\194\176  %s",
-                obj_weather.str_tomorrow_glyph, obj_weather.int_tomorrow_hi,
-                obj_weather.int_tomorrow_lo, obj_weather.str_tomorrow_condition),
-        })
+        if obj_weather.int_today_rain_hour then
+            table.insert(lst_lines, {
+                size = int_rain_size,
+                str = "Rain from " .. fmt_hour12(obj_weather.int_today_rain_hour),
+            })
+        end
+        if obj_weather.int_tomorrow_rain_hour then
+            table.insert(lst_lines, {
+                size = int_tomorrow_size,
+                str = string.format("%s Tomorrow %d\194\176\226\128\147%d\194\176, rain %s",
+                    obj_weather.str_tomorrow_glyph, obj_weather.int_tomorrow_lo,
+                    obj_weather.int_tomorrow_hi, fmt_hour12(obj_weather.int_tomorrow_rain_hour)),
+            })
+        end
     end
     return lst_lines
 end
@@ -138,27 +158,25 @@ local function fetch_weather()
             return
         end
         local obj_data = utils.parse_json(obj_result.stdout or "")
-        if not obj_data or not obj_data.current or not obj_data.daily then
+        if not obj_data or not obj_data.daily or not obj_data.hourly then
             return
         end
 
-        local obj_cur, obj_daily = obj_data.current, obj_data.daily
-        local str_cond, str_glyph = wx_lookup(obj_cur.weather_code, obj_cur.is_day)
+        local obj_daily = obj_data.daily
+        local arr_probs = obj_data.hourly.precipitation_probability
 
-        obj_weather.str_glyph     = str_glyph
-        obj_weather.str_condition = str_cond
-        obj_weather.int_temp      = math.floor(obj_cur.temperature_2m + 0.5)
-        obj_weather.int_feels     = math.floor(obj_cur.apparent_temperature + 0.5)
-        obj_weather.int_humidity  = math.floor(obj_cur.relative_humidity_2m + 0.5)
-        obj_weather.int_wind      = math.floor(obj_cur.wind_speed_10m + 0.5)
-        obj_weather.int_hi        = math.floor(obj_daily.temperature_2m_max[1] + 0.5)
-        obj_weather.int_lo        = math.floor(obj_daily.temperature_2m_min[1] + 0.5)
+        obj_weather.int_today_lo = math.floor(obj_daily.temperature_2m_min[1] + 0.5)
+        obj_weather.int_today_hi = math.floor(obj_daily.temperature_2m_max[1] + 0.5)
+        local _, str_today_glyph = wx_lookup_daily(obj_daily.weather_code[1])
+        obj_weather.str_today_glyph = str_today_glyph
 
-        local str_tom_cond, str_tom_glyph = wx_lookup(obj_daily.weather_code[2], 1)
-        obj_weather.str_tomorrow_glyph     = str_tom_glyph
-        obj_weather.str_tomorrow_condition = str_tom_cond
-        obj_weather.int_tomorrow_hi = math.floor(obj_daily.temperature_2m_max[2] + 0.5)
         obj_weather.int_tomorrow_lo = math.floor(obj_daily.temperature_2m_min[2] + 0.5)
+        obj_weather.int_tomorrow_hi = math.floor(obj_daily.temperature_2m_max[2] + 0.5)
+        local _, str_tomorrow_glyph = wx_lookup_daily(obj_daily.weather_code[2])
+        obj_weather.str_tomorrow_glyph = str_tomorrow_glyph
+
+        obj_weather.int_today_rain_hour    = rain_start_hour(arr_probs, 0)
+        obj_weather.int_tomorrow_rain_hour  = rain_start_hour(arr_probs, 24)
 
         obj_weather.bool_loaded = true
         update()
