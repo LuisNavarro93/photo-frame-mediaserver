@@ -3,12 +3,15 @@
 
 Walks the media folder, inserts any new files into the `media` table, then
 reads each new file's EXIF DateTimeOriginal (falling back to CreateDate) via
-exiftool and records it in `media_dates`. Safe to re-run: already-indexed
-files are skipped.
+exiftool and records it in `media_dates`. When a file has no EXIF date at
+all (most commonly WhatsApp-forwarded images, which strip EXIF), its
+filename is checked for an embedded date as a second fallback. Safe to
+re-run: already-indexed files are skipped.
 """
 
 import argparse
 import json
+import re
 import sqlite3
 import subprocess
 from datetime import datetime
@@ -18,6 +21,24 @@ PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp", ".nef", ".gif"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi"}
 MEDIA_EXTENSIONS = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
 EXIFTOOL_BATCH_SIZE = 200
+MIN_YEAR = 1990
+
+# WhatsApp Image 2026-06-19 at 4.42.18 PM(1).jpeg
+FILENAME_WHATSAPP_PATTERN = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2}) at (\d{1,2})\.(\d{2})\.(\d{2})\s*([AaPp][Mm])"
+)
+# PHOTO-2026-02-18-20-03-12.jpg
+FILENAME_DASHED_DATETIME_PATTERN = re.compile(
+    r"(?<!\d)(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})(?!\d)"
+)
+# IMG_20251230_202041.jpg, PANO_20260202_095742.jpg
+FILENAME_COMPACT_DATETIME_PATTERN = re.compile(
+    r"(?<!\d)(\d{4})(\d{2})(\d{2})[_-](\d{2})(\d{2})(\d{2})(?!\d)"
+)
+# a bare YYYY-MM-DD somewhere in the name
+FILENAME_DASHED_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
+# IMG-20190809-WA0010.jpg -- date with no embedded time
+FILENAME_COMPACT_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
 
 
 def parse_args():
@@ -90,6 +111,64 @@ def parse_exif_date(str_raw_date):
     return obj_datetime.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def build_datetime_str(str_year, str_month, str_day, str_hour="0", str_minute="0", str_second="0"):
+    int_year = int(str_year)
+    if not MIN_YEAR <= int_year <= datetime.now().year + 1:
+        return None
+    try:
+        obj_datetime = datetime(
+            int_year, int(str_month), int(str_day), int(str_hour), int(str_minute), int(str_second)
+        )
+    except ValueError:
+        return None
+    return obj_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def parse_epoch_stem(str_stem):
+    if not str_stem.isdigit() or len(str_stem) not in (10, 13):
+        return None
+    int_epoch_seconds = int(str_stem) // (1000 if len(str_stem) == 13 else 1)
+    try:
+        obj_datetime = datetime.fromtimestamp(int_epoch_seconds)
+    except (ValueError, OSError, OverflowError):
+        return None
+    if not MIN_YEAR <= obj_datetime.year <= datetime.now().year + 1:
+        return None
+    return obj_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def extract_date_from_filename(str_stem):
+    obj_whatsapp_match = FILENAME_WHATSAPP_PATTERN.search(str_stem)
+    if obj_whatsapp_match:
+        str_year, str_month, str_day, str_hour12, str_minute, str_second, str_ampm = (
+            obj_whatsapp_match.groups()
+        )
+        int_hour24 = int(str_hour12) % 12
+        if str_ampm.upper() == "PM":
+            int_hour24 += 12
+        str_date_taken = build_datetime_str(str_year, str_month, str_day, int_hour24, str_minute, str_second)
+        if str_date_taken:
+            return str_date_taken
+
+    for obj_pattern in (FILENAME_DASHED_DATETIME_PATTERN, FILENAME_COMPACT_DATETIME_PATTERN):
+        for obj_match in obj_pattern.finditer(str_stem):
+            str_date_taken = build_datetime_str(*obj_match.groups())
+            if str_date_taken:
+                return str_date_taken
+
+    str_date_taken = parse_epoch_stem(str_stem)
+    if str_date_taken:
+        return str_date_taken
+
+    for obj_pattern in (FILENAME_DASHED_DATE_PATTERN, FILENAME_COMPACT_DATE_PATTERN):
+        for obj_match in obj_pattern.finditer(str_stem):
+            str_date_taken = build_datetime_str(*obj_match.groups())
+            if str_date_taken:
+                return str_date_taken
+
+    return None
+
+
 def read_capture_dates(lst_paths):
     dict_dates_by_path = {}
     for int_start in range(0, len(lst_paths), EXIFTOOL_BATCH_SIZE):
@@ -121,6 +200,10 @@ def insert_dates(obj_conn: sqlite3.Connection, lst_pending, dict_dates_by_path) 
     for int_media_id, str_path in lst_pending:
         tup_date = dict_dates_by_path.get(str_path, (None, None))
         str_date_taken, str_date_source = tup_date
+        if not str_date_taken:
+            str_date_taken = extract_date_from_filename(Path(str_path).stem)
+            if str_date_taken:
+                str_date_source = "filename"
         obj_conn.execute(
             """
             INSERT INTO media_dates (media_id, date_taken, date_source)

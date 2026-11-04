@@ -173,10 +173,15 @@ run only looks up EXIF data for anything new since the last one.
 - `media` table: one row per file (path, filename, photo/video, extension,
   size).
 - `media_dates` table: one row per file once its capture date has been
-  looked up, with `date_taken` left `NULL` when the file has no EXIF date
-  — most commonly WhatsApp-forwarded images, which strip EXIF on
-  compression. Deliberately not falling back to the file's mtime, for the
-  same reason the caption overlay doesn't.
+  looked up. When a file has no EXIF date — most commonly
+  WhatsApp-forwarded images, which strip EXIF on compression — its
+  filename is checked next for an embedded date (`IMG_20251230_202041.jpg`,
+  `IMG-20190809-WA0010.jpg`, `PHOTO-2026-02-18-20-03-12.jpg`, `WhatsApp
+  Image 2026-06-19 at 4.42.18 PM.jpeg`, or a raw epoch-millisecond
+  filename), recorded with `date_source = 'filename'`. `date_taken` is
+  left `NULL` only when neither EXIF nor the filename yields a date.
+  Deliberately not falling back to the file's mtime, for the same reason
+  the caption overlay doesn't.
 
 The database itself lives at `~/Desktop/media-index/media.db` — not
 tracked in this repo (runtime data, not a script), and deliberately

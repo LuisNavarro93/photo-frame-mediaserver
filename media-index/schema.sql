@@ -11,14 +11,15 @@ CREATE TABLE IF NOT EXISTS media (
     indexed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
 );
 
--- One row per media file once its capture date has been looked up via
--- exiftool. date_taken is NULL when the file carries no DateTimeOriginal
--- or CreateDate tag -- this still counts as "processed" so build_index.py
--- doesn't retry it on every run.
+-- One row per media file once its capture date has been looked up: via
+-- exiftool first (DateTimeOriginal, falling back to CreateDate), then by
+-- parsing a date out of the filename when neither EXIF tag is present.
+-- date_taken is NULL when none of those yield a date -- this still counts
+-- as "processed" so build_index.py doesn't retry it on every run.
 CREATE TABLE IF NOT EXISTS media_dates (
     media_id INTEGER PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
     date_taken TEXT,
-    date_source TEXT CHECK (date_source IN ('DateTimeOriginal', 'CreateDate'))
+    date_source TEXT CHECK (date_source IN ('DateTimeOriginal', 'CreateDate', 'filename'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_media_dates_date_taken ON media_dates(date_taken);
