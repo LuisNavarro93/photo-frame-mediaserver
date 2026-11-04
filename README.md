@@ -48,7 +48,7 @@ what's currently running on the machine.
 | `neovim` | editing scripts/config on the machine directly | 0.11.6-1 |
 | `vim` | same, fallback/alternative editor | 9.1.2141-1ubuntu4.7 |
 | `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
-| `libimage-exiftool-perl` (`exiftool`) | slideshow — reads each photo/video's capture date for the on-screen caption | not yet installed |
+| `libimage-exiftool-perl` (`exiftool`) | slideshow — reads each photo/video's capture date for the on-screen caption; media-index — same lookup, stored in SQLite | 13.50+dfsg-1 |
 
 Install everything at once:
 ```bash
@@ -156,6 +156,38 @@ tracks which file a given async result is still valid for).
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
 - `clock.lua` → deployed to `~/.config/mpv/scripts/clock.lua` (`644`)
 - `slideshow.desktop` → deployed to `~/.config/autostart/slideshow.desktop`
+
+## media-index
+
+Builds a small SQLite index of every photo/video under `~/Pictures`,
+recording each file's path and — when the file has one — its capture date,
+read via the same `exiftool -DateTimeOriginal -CreateDate` fallback order
+the slideshow's caption overlay (`clock.lua`) already uses.
+
+Unlike the rest of this repo, nothing here gets deployed elsewhere — it
+runs in place as `media-index/build_index.py`, which reads
+`media-index/schema.sql` next to it to create the tables on first run.
+Re-running it is safe: files already in the database are skipped, so each
+run only looks up EXIF data for anything new since the last one.
+
+- `media` table: one row per file (path, filename, photo/video, extension,
+  size).
+- `media_dates` table: one row per file once its capture date has been
+  looked up, with `date_taken` left `NULL` when the file has no EXIF date
+  — most commonly WhatsApp-forwarded images, which strip EXIF on
+  compression. Deliberately not falling back to the file's mtime, for the
+  same reason the caption overlay doesn't.
+
+The database itself lives at `~/Desktop/media-index/media.db` — not
+tracked in this repo (runtime data, not a script), and deliberately
+**not** inside `~/Pictures`: `slideshow.sh`'s `find ~/Pictures -type f`
+recurses into every subfolder, even hidden ones, and would otherwise hand
+the `.db` file to `mpv` as if it were a photo.
+
+Run it with:
+```bash
+python3 media-index/build_index.py
+```
 
 ## Reinstalling from this repo
 
