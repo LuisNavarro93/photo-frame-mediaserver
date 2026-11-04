@@ -7,6 +7,12 @@ local obj_overlay = mp.create_osd_overlay("ass-events")
 obj_overlay.res_x = 1280   -- virtual canvas; mpv scales it to the real screen
 obj_overlay.res_y = 720
 
+-- "Taken <date>" caption, bottom-left: the EXIF/container capture date of
+-- whatever photo or video is currently showing, when it actually has one.
+local obj_caption_overlay = mp.create_osd_overlay("ass-events")
+obj_caption_overlay.res_x = 1280
+obj_caption_overlay.res_y = 720
+
 -- clock
 local int_margin_x    = 65   -- gap from the right edge (incl. ~1cm extra left shift)
 local int_offset_down = 70   -- how far below the top corner to sit (~8% of height)
@@ -14,6 +20,13 @@ local int_date_size   = 38
 local int_time_size   = 68
 local str_date_format = "%a %d %b %Y"
 local str_time_format = "%H:%M"
+
+-- date caption
+local bool_caption_enabled    = true
+local int_caption_margin_x    = 40
+local int_caption_margin_y    = 40   -- from the bottom edge
+local int_caption_size        = 24
+local str_caption_date_format = "%d %b %Y"
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 -- "Icon-forward hero" layout: today's icon + daily low-high lead, with a
@@ -96,6 +109,57 @@ local function fmt_hour12(int_h)
     end
     local str_ampm = (int_h < 12) and "AM" or "PM"
     return int_h12 .. " " .. str_ampm
+end
+
+-- Path the current (possibly still in-flight) exiftool read is for --
+-- lets a slow read that outlives its photo's 7s on screen be discarded
+-- instead of captioning the next photo with the wrong date.
+local str_caption_pending_path = nil
+
+local function draw_caption(str_text)
+    if not str_text or str_text == "" then
+        obj_caption_overlay.data = ""
+    else
+        -- \an1 = anchor bottom-left; same white-fill/black-outline treatment as the clock.
+        obj_caption_overlay.data = string.format(
+            "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\fs%d}Taken %s",
+            int_caption_margin_x, obj_caption_overlay.res_y - int_caption_margin_y,
+            int_caption_size, str_text)
+    end
+    obj_caption_overlay:update()
+end
+
+-- First non-blank line of str_text, trimmed.
+local function first_line(str_text)
+    for str_line in (str_text .. "\n"):gmatch("(.-)\n") do
+        str_line = str_line:match("^%s*(.-)%s*$")
+        if str_line ~= "" then
+            return str_line
+        end
+    end
+    return nil
+end
+
+local function fetch_caption(str_path)
+    str_caption_pending_path = str_path
+    draw_caption(nil)  -- clear immediately so the old photo's date doesn't linger
+    mp.command_native_async({
+        name = "subprocess",
+        -- DateTimeOriginal (EXIF capture time) first, CreateDate (common on
+        -- video containers) as fallback; -s3 prints just the raw value.
+        args = {"exiftool", "-DateTimeOriginal", "-CreateDate", "-s3",
+                "-d", str_caption_date_format, str_path},
+        capture_stdout = true,
+        playback_only = false,
+    }, function(bool_ok, obj_result)
+        if str_path ~= str_caption_pending_path then
+            return  -- a newer file has since loaded; this result is stale
+        end
+        if not bool_ok or not obj_result or obj_result.status ~= 0 then
+            return
+        end
+        draw_caption(first_line(obj_result.stdout or ""))
+    end)
 end
 
 local obj_weather = { bool_loaded = false }
@@ -183,8 +247,18 @@ local function fetch_weather()
     end)
 end
 
+local function on_file_loaded()
+    update()
+    if bool_caption_enabled then
+        local str_path = mp.get_property("path")
+        if str_path then
+            fetch_caption(str_path)
+        end
+    end
+end
+
 mp.add_periodic_timer(1, update)
-mp.register_event("file-loaded", update)
+mp.register_event("file-loaded", on_file_loaded)
 mp.add_periodic_timer(int_weather_refresh_s, fetch_weather)
 update()
 fetch_weather()

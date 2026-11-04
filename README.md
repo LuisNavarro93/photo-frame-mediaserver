@@ -48,10 +48,11 @@ what's currently running on the machine.
 | `neovim` | editing scripts/config on the machine directly | 0.11.6-1 |
 | `vim` | same, fallback/alternative editor | 9.1.2141-1ubuntu4.7 |
 | `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
+| `libimage-exiftool-perl` (`exiftool`) | slideshow — reads each photo/video's capture date for the on-screen caption | not yet installed |
 
 Install everything at once:
 ```bash
-sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl
+sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl libimage-exiftool-perl
 ```
 
 `util-linux` ships as part of the base Ubuntu install, so `rtcwake` is
@@ -137,6 +138,19 @@ via `libass`'s normal font-fallback instead of needing hand-drawn vector
 icons. Location (`str_weather_lat`/`str_weather_lon`, currently Merida,
 Yucatan) and units (`temperature_unit` in the request URL, currently
 Celsius) are constants near the top of `clock.lua`.
+
+A third overlay, bottom-left, captions whatever photo or video is
+currently showing with its capture date ("Taken 14 Mar 2019") when one
+can be read -- `exiftool -DateTimeOriginal -CreateDate` on the current
+file's path (`DateTimeOriginal` first, falling back to `CreateDate` for
+files/videos that only carry that one), run async on every `file-loaded`
+event the same non-blocking way as the weather fetch. No EXIF tag means
+no caption -- deliberately not falling back to the file's mtime, which
+reflects when it was copied onto this machine rather than when it was
+taken, and would be misleading labeled as a date. A slow exiftool read
+that outlives its photo's 7s on screen is discarded rather than
+captioning the next photo with the wrong date (`str_caption_pending_path`
+tracks which file a given async result is still valid for).
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
