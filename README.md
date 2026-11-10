@@ -48,7 +48,7 @@ what's currently running on the machine.
 | `neovim` | editing scripts/config on the machine directly | 0.11.6-1 |
 | `vim` | same, fallback/alternative editor | 9.1.2141-1ubuntu4.7 |
 | `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
-| `libimage-exiftool-perl` (`exiftool`) | slideshow — reads each photo/video's capture date for the on-screen caption; media-index — same lookup, stored in SQLite | 13.50+dfsg-1 |
+| `libimage-exiftool-perl` (`exiftool`) | slideshow — reads a photo/video's capture date for the on-screen caption when media-index hasn't indexed it yet; media-index — same lookup plus GPS, batched and stored in SQLite | 13.50+dfsg-1 |
 
 Install everything at once:
 ```bash
@@ -140,17 +140,21 @@ Yucatan) and units (`temperature_unit` in the request URL, currently
 Celsius) are constants near the top of `clock.lua`.
 
 A third overlay, bottom-left, captions whatever photo or video is
-currently showing with its capture date ("Taken 14 Mar 2019") when one
-can be read -- `exiftool -DateTimeOriginal -CreateDate` on the current
-file's path (`DateTimeOriginal` first, falling back to `CreateDate` for
-files/videos that only carry that one), run async on every `file-loaded`
-event the same non-blocking way as the weather fetch. No EXIF tag means
-no caption -- deliberately not falling back to the file's mtime, which
-reflects when it was copied onto this machine rather than when it was
-taken, and would be misleading labeled as a date. A slow exiftool read
-that outlives its photo's 7s on screen is discarded rather than
-captioning the next photo with the wrong date (`str_caption_pending_path`
-tracks which file a given async result is still valid for).
+currently showing with its capture date and location ("Taken 14 Mar
+2019 · Mérida, Mexico") when either is known. The primary source is
+media-index's database (below) -- `query_media.py` is a few
+milliseconds, since it's a local SQLite lookup rather than reading EXIF
+live. A file media-index hasn't indexed yet (just added, scan not yet
+re-run) falls back to a direct, date-only `exiftool -DateTimeOriginal
+-CreateDate` read -- no location, since that needs the reverse-geocode
+cache, not a live network call during the slideshow. Both paths run
+async on every `file-loaded` event, the same non-blocking way as the
+weather fetch, and a slow read that outlives its photo's 7s on screen is
+discarded rather than captioning the next photo with stale data
+(`str_caption_pending_path` tracks which file a given async result is
+still valid for). No date and no location means no caption --
+deliberately not falling back to the file's mtime, which reflects when
+it was copied onto this machine rather than when it was taken.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
@@ -160,9 +164,10 @@ tracks which file a given async result is still valid for).
 ## media-index
 
 Builds a small SQLite index of every photo/video under `~/Pictures`,
-recording each file's path and — when the file has one — its capture date,
-read via the same `exiftool -DateTimeOriginal -CreateDate` fallback order
-the slideshow's caption overlay (`clock.lua`) already uses.
+recording each file's path, its capture date when it has one, and its
+reverse-geocoded location when it carries GPS -- both read the same way
+the slideshow's caption overlay (`clock.lua`) falls back to live when a
+file hasn't been indexed yet.
 
 Unlike the rest of this repo, nothing here gets deployed elsewhere — it
 runs in place as `media-index/build_index.py`, which reads
@@ -182,6 +187,22 @@ run only looks up EXIF data for anything new since the last one.
   left `NULL` only when neither EXIF nor the filename yields a date.
   Deliberately not falling back to the file's mtime, for the same reason
   the caption overlay doesn't.
+- `media_locations` table: one row per file once its GPS has been looked
+  up and (when present) reverse-geocoded into a "City, Country" string
+  via [Nominatim](https://nominatim.openstreetmap.org) (OpenStreetMap,
+  free, no API key). `lat`/`lon`/`location` are all `NULL` when the file
+  carries no GPS EXIF -- most photos here, since WhatsApp strips GPS the
+  same way it strips dates, and GoPro/some-camera exports often don't
+  carry it either (147 of 588 files have a location as of the last run).
+  This still counts as "processed", same `media_dates` idiom, so a
+  re-run doesn't retry it.
+- `geocode_cache` table: reverse-geocode results keyed by coordinate
+  rounded to ~1.1km, so a cluster of photos from the same outing shares
+  one Nominatim lookup instead of one per file. Geocoding is rate-limited
+  to one request/second (Nominatim's usage policy for the free public
+  instance) and sent with a generic, non-personal `User-Agent` identifying
+  this project -- the policy asks automated clients for a contact method,
+  which here is the GitHub repo link rather than anyone's address.
 
 The database itself lives at `~/Desktop/media-index/media.db` — not
 tracked in this repo (runtime data, not a script), and deliberately
@@ -189,7 +210,12 @@ tracked in this repo (runtime data, not a script), and deliberately
 recurses into every subfolder, even hidden ones, and would otherwise hand
 the `.db` file to `mpv` as if it were a photo.
 
-Run it with:
+`query_media.py PATH` looks up one file's cached date/location by exact
+path and prints them (either may be blank) for the slideshow's caption
+overlay to read -- see `clock.lua` above. It exits non-zero rather than
+printing anything for a file `build_index.py` hasn't indexed yet.
+
+Run the indexer with:
 ```bash
 python3 media-index/build_index.py
 ```

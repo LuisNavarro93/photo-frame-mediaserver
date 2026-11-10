@@ -27,6 +27,12 @@ local int_caption_margin_x    = 40
 local int_caption_margin_y    = 40   -- from the bottom edge
 local int_caption_size        = 24
 local str_caption_date_format = "%d %b %Y"
+-- date + reverse-geocoded location, pre-built by media-index's
+-- build_index.py (run manually/periodically -- see the repo README);
+-- queried here via its query_media.py, both in the repo checkout since
+-- media-index runs in place rather than getting deployed elsewhere.
+local str_media_index_query = "/home/portrait/Documents/photo-frame-mediaserver/media-index/query_media.py"
+local str_media_index_db    = "/home/portrait/Desktop/media-index/media.db"
 
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 -- "Icon-forward hero" layout: today's icon + daily low-high lead, with a
@@ -116,16 +122,27 @@ end
 -- instead of captioning the next photo with the wrong date.
 local str_caption_pending_path = nil
 
-local function draw_caption(str_text)
-    if not str_text or str_text == "" then
+local function draw_caption(str_date, str_location)
+    if not str_date and not str_location then
         obj_caption_overlay.data = ""
-    else
-        -- \an1 = anchor bottom-left; same white-fill/black-outline treatment as the clock.
-        obj_caption_overlay.data = string.format(
-            "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\fs%d}Taken %s",
-            int_caption_margin_x, obj_caption_overlay.res_y - int_caption_margin_y,
-            int_caption_size, str_text)
+        obj_caption_overlay:update()
+        return
     end
+
+    local str_text
+    if str_date and str_location then
+        str_text = "Taken " .. str_date .. " \194\183 " .. str_location
+    elseif str_date then
+        str_text = "Taken " .. str_date
+    else
+        str_text = str_location
+    end
+
+    -- \an1 = anchor bottom-left; same white-fill/black-outline treatment as the clock.
+    obj_caption_overlay.data = string.format(
+        "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\fs%d}%s",
+        int_caption_margin_x, obj_caption_overlay.res_y - int_caption_margin_y,
+        int_caption_size, str_text)
     obj_caption_overlay:update()
 end
 
@@ -140,13 +157,12 @@ local function first_line(str_text)
     return nil
 end
 
-local function fetch_caption(str_path)
-    str_caption_pending_path = str_path
-    draw_caption(nil)  -- clear immediately so the old photo's date doesn't linger
+-- Fallback for a photo photo_meta.py hasn't scanned yet: a direct,
+-- date-only exiftool read (no location -- that needs the pre-built
+-- reverse-geocode cache, not a live lookup during the slideshow).
+local function fetch_caption_live(str_path)
     mp.command_native_async({
         name = "subprocess",
-        -- DateTimeOriginal (EXIF capture time) first, CreateDate (common on
-        -- video containers) as fallback; -s3 prints just the raw value.
         args = {"exiftool", "-DateTimeOriginal", "-CreateDate", "-s3",
                 "-d", str_caption_date_format, str_path},
         capture_stdout = true,
@@ -158,7 +174,36 @@ local function fetch_caption(str_path)
         if not bool_ok or not obj_result or obj_result.status ~= 0 then
             return
         end
-        draw_caption(first_line(obj_result.stdout or ""))
+        local str_date = first_line(obj_result.stdout or "")
+        if str_date then
+            draw_caption(str_date, nil)
+        end
+    end)
+end
+
+local function fetch_caption(str_path)
+    str_caption_pending_path = str_path
+    draw_caption(nil, nil)  -- clear immediately so the old photo's caption doesn't linger
+    mp.command_native_async({
+        name = "subprocess",
+        args = {"python3", str_media_index_query, str_path, "--db", str_media_index_db},
+        capture_stdout = true,
+        playback_only = false,
+    }, function(bool_ok, obj_result)
+        if str_path ~= str_caption_pending_path then
+            return  -- a newer file has since loaded; this result is stale
+        end
+        if bool_ok and obj_result and obj_result.status == 0 then
+            local str_date, str_location = (obj_result.stdout or ""):match("^(.-)\n(.-)\n?$")
+            if str_date == "" then str_date = nil end
+            if str_location == "" then str_location = nil end
+            if str_date or str_location then
+                draw_caption(str_date, str_location)
+                return
+            end
+        end
+        -- not in the database yet (a newly-added photo) -- fall back live
+        fetch_caption_live(str_path)
     end)
 end
 

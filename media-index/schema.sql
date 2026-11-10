@@ -23,3 +23,20 @@ CREATE TABLE IF NOT EXISTS media_dates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_media_dates_date_taken ON media_dates(date_taken);
+
+-- One row per media file once its GPS location has been looked up (same
+-- "processed, possibly empty" idiom as media_dates): lat/lon/location are
+-- all NULL when the file carries no GPS EXIF tags.
+CREATE TABLE IF NOT EXISTS media_locations (
+    media_id INTEGER PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+    lat REAL,
+    lon REAL,
+    location TEXT
+);
+
+-- Reverse-geocode results cached by rounded (~1.1km) coordinate, so photos
+-- taken near each other share one Nominatim lookup instead of one each.
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    geo_key TEXT PRIMARY KEY,
+    location TEXT
+);
