@@ -141,10 +141,14 @@ Yucatan) and units (`temperature_unit` in the request URL, currently
 Celsius) are constants near the top of `clock.lua`.
 
 A third overlay, bottom-left, captions whatever photo or video is
-currently showing with its capture date and location ("Taken 14 Mar
-2019 · Mérida, Mexico") when either is known, with a small (120x90)
-map thumbnail -- a real OpenStreetMap crop with a pin on it -- to its
-left when the location has one cached. The primary source is
+currently showing. With a location and a cached map thumbnail (the
+common case, going forward), it's the "Option E" style from the design
+pass: a small (120x90) real OpenStreetMap crop with a pin, location
+bold and led on one line next to it, capture date smaller underneath.
+Without a map -- no GPS, or not indexed yet -- it falls back to the
+plain single-line "Taken 14 Mar 2019" (or "... · Mérida, Mexico" if a
+location came back without a map somehow succeeding). The primary
+source is
 media-index's database (below) -- `query_media.py` is a few
 milliseconds, since it's a local SQLite lookup rather than reading EXIF
 live. A file media-index hasn't indexed yet (just added, scan not yet

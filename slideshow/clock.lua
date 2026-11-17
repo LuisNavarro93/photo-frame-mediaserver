@@ -27,6 +27,13 @@ local int_caption_margin_x    = 40
 local int_caption_margin_y    = 40   -- from the bottom edge
 local int_caption_size        = 24
 local str_caption_date_format = "%d %b %Y"
+-- When a map is showing, the caption switches to the Option E style:
+-- location led (bold, bigger), date underneath (smaller, regular
+-- weight) -- rather than the single "Taken <date> . <location>" line
+-- used when there's no map to sit next to.
+local int_caption_location_size = 26
+local int_caption_date_size     = 18
+local num_caption_line_height_ratio = 1.2  -- rough line-pitch estimate, for vertical centering only
 -- date + reverse-geocoded location, pre-built by media-index's
 -- build_index.py (run manually/periodically -- see the repo README);
 -- queried here via its query_media.py, both in the repo checkout since
@@ -136,8 +143,10 @@ local str_caption_pending_path = nil
 
 local function draw_caption(str_date, str_location, str_map_path)
     local int_text_x = int_caption_margin_x
+    local int_text_y_offset = int_caption_margin_y  -- distance of the text's bottom edge from the screen bottom
+    local bool_showing_map = str_map_path and str_map_path ~= ""
 
-    if str_map_path and str_map_path ~= "" then
+    if bool_showing_map then
         local int_real_w, int_real_h = mp.get_osd_size()
         if not int_real_w or int_real_w == 0 then int_real_w = 1024 end
         if not int_real_h or int_real_h == 0 then int_real_h = 576 end
@@ -152,6 +161,15 @@ local function draw_caption(str_date, str_location, str_map_path)
         bool_map_shown = true
 
         int_text_x = math.floor((int_map_margin_x + int_map_w) * num_scale) + int_caption_gap_after_map
+
+        -- The two-line text block is shorter than the 90px map, so
+        -- bottom-aligning both would leave it sitting low with empty
+        -- space above next to the map -- lift it to roughly center
+        -- against the map's height instead.
+        local num_map_h_virtual = int_map_h * num_scale
+        local num_text_h_virtual =
+            (int_caption_location_size + int_caption_date_size) * num_caption_line_height_ratio
+        int_text_y_offset = int_caption_margin_y + math.floor((num_map_h_virtual - num_text_h_virtual) / 2)
     elseif bool_map_shown then
         mp.command_native({ name = "overlay-remove", id = int_map_overlay_id })
         bool_map_shown = false
@@ -164,19 +182,28 @@ local function draw_caption(str_date, str_location, str_map_path)
     end
 
     local str_text
-    if str_date and str_location then
-        str_text = "Taken " .. str_date .. " \194\183 " .. str_location
+    if bool_showing_map and str_location then
+        -- Option E: location led, bold and bigger; date underneath,
+        -- smaller and regular weight (the base style below sets bold
+        -- for everything, so the date line resets it with \\b0).
+        if str_date then
+            str_text = string.format("{\\fs%d\\b1}%s\\N{\\fs%d\\b0}%s",
+                int_caption_location_size, str_location, int_caption_date_size, str_date)
+        else
+            str_text = string.format("{\\fs%d\\b1}%s", int_caption_location_size, str_location)
+        end
+    elseif str_date and str_location then
+        str_text = string.format("{\\fs%d}Taken %s \194\183 %s", int_caption_size, str_date, str_location)
     elseif str_date then
-        str_text = "Taken " .. str_date
+        str_text = string.format("{\\fs%d}Taken %s", int_caption_size, str_date)
     else
-        str_text = str_location
+        str_text = string.format("{\\fs%d}%s", int_caption_size, str_location)
     end
 
     -- \an1 = anchor bottom-left; same white-fill/black-outline treatment as the clock.
     obj_caption_overlay.data = string.format(
-        "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\fs%d}%s",
-        int_text_x, obj_caption_overlay.res_y - int_caption_margin_y,
-        int_caption_size, str_text)
+        "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&}%s",
+        int_text_x, obj_caption_overlay.res_y - int_text_y_offset, str_text)
     obj_caption_overlay:update()
 end
 
