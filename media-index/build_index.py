@@ -147,12 +147,19 @@ def fetch_unprocessed_media(obj_conn: sqlite3.Connection):
 
 
 def fetch_unlocated_media(obj_conn: sqlite3.Connection):
+    # Also re-offers a file whose row exists but never resolved a
+    # location despite having GPS (lat present, location NULL) -- a
+    # cached NULL there means "not resolved yet", not "done", since a
+    # transient Nominatim failure looks identical to a confirmed empty
+    # result otherwise. A file with no GPS at all (lat IS NULL) has
+    # nothing to look up and is correctly left alone.
     obj_cursor = obj_conn.execute(
         """
         SELECT media.id, media.path
         FROM media
         LEFT JOIN media_locations ON media_locations.media_id = media.id
         WHERE media_locations.media_id IS NULL
+           OR (media_locations.lat IS NOT NULL AND media_locations.location IS NULL)
         """
     )
     return obj_cursor.fetchall()
@@ -293,11 +300,16 @@ def read_gps_coords(lst_paths):
                 num_lon = float(num_lon) if num_lon is not None else None
             except (TypeError, ValueError):
                 num_lat = num_lon = None
+            if num_lat == 0.0 and num_lon == 0.0:
+                # "Null island" -- the GPS tag exists but is an unset
+                # placeholder (common on drone footage when GPS hadn't
+                # locked yet at capture), not a real coordinate.
+                num_lat = num_lon = None
             dict_coords_by_path[str_path] = (num_lat, num_lon)
     return dict_coords_by_path
 
 
-def reverse_geocode(num_lat, num_lon):
+def reverse_geocode(num_lat, num_lon, int_retries=2):
     str_params = urllib.parse.urlencode({
         "format": "json", "lat": f"{num_lat:.5f}", "lon": f"{num_lon:.5f}",
         "zoom": "10", "addressdetails": "1", "accept-language": "en",
@@ -306,10 +318,16 @@ def reverse_geocode(num_lat, num_lon):
         f"{NOMINATIM_URL}?{str_params}",
         headers={"User-Agent": NOMINATIM_USER_AGENT},
     )
-    try:
-        with urllib.request.urlopen(obj_req, timeout=10) as obj_resp:
-            dict_data = json.load(obj_resp)
-    except Exception:
+    dict_data = None
+    for int_attempt in range(int_retries + 1):
+        try:
+            with urllib.request.urlopen(obj_req, timeout=10) as obj_resp:
+                dict_data = json.load(obj_resp)
+            break
+        except Exception:
+            if int_attempt < int_retries:
+                time.sleep(NOMINATIM_DELAY_S)
+    if dict_data is None:
         return None
 
     dict_addr = dict_data.get("address", {})
@@ -396,7 +414,7 @@ def ensure_map_thumbnail(obj_conn: sqlite3.Connection, str_geo_key, num_lat, num
     obj_row = obj_conn.execute(
         "SELECT map_path FROM map_cache WHERE geo_key = ?", (str_geo_key,)
     ).fetchone()
-    if obj_row:
+    if obj_row and obj_row[0]:
         return obj_row[0], False
 
     obj_img = render_map_thumbnail(num_lat, num_lon)
@@ -428,7 +446,7 @@ def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_p
             obj_row = obj_conn.execute(
                 "SELECT location FROM geocode_cache WHERE geo_key = ?", (str_geo_key,)
             ).fetchone()
-            if obj_row:
+            if obj_row and obj_row[0]:
                 str_location = obj_row[0]
             else:
                 str_location = reverse_geocode(num_lat, num_lon)
@@ -445,7 +463,7 @@ def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_p
 
         obj_conn.execute(
             """
-            INSERT INTO media_locations (media_id, lat, lon, location)
+            INSERT OR REPLACE INTO media_locations (media_id, lat, lon, location)
             VALUES (?, ?, ?, ?)
             """,
             (int_media_id, num_lat, num_lon, str_location),

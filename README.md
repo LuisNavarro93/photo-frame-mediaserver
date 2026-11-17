@@ -213,9 +213,24 @@ run only looks up EXIF data for anything new since the last one.
   free, no API key). `lat`/`lon`/`location` are all `NULL` when the file
   carries no GPS EXIF -- most photos here, since WhatsApp strips GPS the
   same way it strips dates, and GoPro/some-camera exports often don't
-  carry it either (147 of 588 files have a location as of the last run).
-  This still counts as "processed", same `media_dates` idiom, so a
-  re-run doesn't retry it.
+  carry it either (514 of 586 files have a location as of the last run).
+  A GPS tag that's exactly `(0, 0)` -- "null island", a common unset
+  placeholder on drone/camera footage when GPS hadn't locked yet at
+  capture -- is treated the same as no GPS at all, rather than
+  geocoding (and mapping) the middle of the ocean.
+
+  Unlike `media_dates`, a file with GPS but no resolved location *isn't*
+  treated as permanently "processed": `location IS NULL` while
+  `lat IS NOT NULL` is retried on every run, since a cached `NULL` there
+  is indistinguishable from "Nominatim's request failed this one time"
+  without that distinction -- found the hard way, when a run's worth of
+  back-to-back geocode calls hit a handful of transient failures that
+  then looked permanent. `reverse_geocode()` also retries a failed
+  request twice before giving up, and the same "NULL isn't done" fix
+  applies to `map_cache` below. The cost is one wasted Nominatim call
+  per run for a coordinate that genuinely has no address data (rare) --
+  worth it for files that fix themselves on the next run instead of
+  needing a manual `DELETE FROM media_locations` to notice.
 - `geocode_cache` table: reverse-geocode results keyed by coordinate
   rounded to ~1.1km, so a cluster of photos from the same outing shares
   one Nominatim lookup instead of one per file. Geocoding is rate-limited
