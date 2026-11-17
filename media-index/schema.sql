@@ -40,3 +40,12 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
     geo_key TEXT PRIMARY KEY,
     location TEXT
 );
+
+-- Pre-rendered map thumbnail (raw BGRA pixel buffer, for mpv's overlay-add)
+-- per geo_key, same dedup-by-rounded-coordinate idiom as geocode_cache.
+-- map_path is NULL when rendering failed (tile fetch error) -- still counts
+-- as "tried", so a re-run doesn't retry it every time.
+CREATE TABLE IF NOT EXISTS map_cache (
+    geo_key TEXT PRIMARY KEY,
+    map_path TEXT
+);

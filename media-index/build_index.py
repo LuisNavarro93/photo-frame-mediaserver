@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Scan ~/Pictures for photos/videos and record each file's capture date
-and GPS location (reverse-geocoded) in SQLite.
+"""Scan ~/Pictures for photos/videos and record each file's capture date,
+GPS location (reverse-geocoded), and a small map thumbnail in SQLite.
 
 Walks the media folder, inserts any new files into the `media` table, then
 reads each new file's EXIF DateTimeOriginal (falling back to CreateDate)
@@ -10,17 +10,27 @@ filename is checked for an embedded date as a second fallback.
 
 Separately, any file with GPS EXIF coordinates gets reverse-geocoded via
 Nominatim (OpenStreetMap) into a "City, Country" string in
-`media_locations`, with results cached by rounded coordinate in
-`geocode_cache` so photos taken near each other share one lookup instead
-of one each -- this keeps the (rate-limited, 1 request/second) geocoding
-pass well behaved on a library this size.
+`media_locations`, and a small (120x90) map thumbnail -- a single
+OpenStreetMap tile cropped around the point, with a marker drawn on it --
+is rendered and saved as a raw BGRA pixel buffer for mpv's `overlay-add`
+command (which needs raw pixels, not a .png). Both the geocode and the
+tile fetch are cached by rounded coordinate (`geocode_cache`/`map_cache`)
+so photos taken near each other -- same ~1.1km grouping -- share one
+lookup instead of one each, and both are rate-limited to one request per
+second, in line with Nominatim's and OSM's tile server's usage policies
+for their free public services.
 
 Safe to re-run: already-indexed files, and files already looked up for
-location, are skipped.
+location, are skipped. (Re-tagging a file's GPS after it's been indexed
+once means clearing its row from media_locations first -- see the
+README -- since "already looked up, found nothing" and "already looked
+up, here's what we found" look the same to this skip check.)
 """
 
 import argparse
+import io
 import json
+import math
 import re
 import sqlite3
 import subprocess
@@ -29,6 +39,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+from PIL import Image, ImageDraw
 
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp", ".nef", ".gif"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi"}
@@ -39,7 +51,17 @@ MIN_YEAR = 1990
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 NOMINATIM_USER_AGENT = "photo-frame-mediaserver/1.0 (+https://github.com/LuisNavarro93/photo-frame-mediaserver)"
 NOMINATIM_DELAY_S = 1.1  # stay under Nominatim's 1 request/second usage policy
-GEO_ROUND = 2             # decimal places (~1.1km) for the reverse-geocode cache key
+GEO_ROUND = 2             # decimal places (~1.1km) for the reverse-geocode/map cache key
+
+TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+TILE_USER_AGENT = NOMINATIM_USER_AGENT  # same generic, project-identifying UA
+TILE_DELAY_S = 1.1   # same courteous one-request-per-second spacing
+TILE_ZOOM = 14        # ~1.2km across a tile at this latitude -- roughly matches GEO_ROUND
+MAP_W, MAP_H = 120, 90       # thumbnail size; must match clock.lua's int_map_w/int_map_h
+MAP_CORNER_RADIUS = 10
+MAP_MARKER_RADIUS = 4
+MAP_MARKER_FILL = (216, 90, 74, 255)
+MAP_MARKER_OUTLINE = (255, 255, 255, 255)
 
 # WhatsApp Image 2026-06-19 at 4.42.18 PM(1).jpeg
 FILENAME_WHATSAPP_PATTERN = re.compile(
@@ -70,6 +92,11 @@ def parse_args():
         "--db",
         default=str(Path.home() / "Desktop" / "media-index" / "media.db"),
         help="SQLite database path (default: ~/Desktop/media-index/media.db)",
+    )
+    obj_parser.add_argument(
+        "--maps-dir",
+        default=str(Path.home() / "Desktop" / "media-index" / "maps"),
+        help="Directory for rendered map thumbnails (default: ~/Desktop/media-index/maps)",
     )
     return obj_parser.parse_args()
 
@@ -296,8 +323,102 @@ def reverse_geocode(num_lat, num_lon):
     return str_place or str_country or dict_data.get("display_name")
 
 
-def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_path) -> int:
+def latlon_to_tile_pixel(num_lat, num_lon, int_zoom):
+    """Standard Web Mercator slippy-map math: which tile (x_tile, y_tile)
+    at int_zoom contains (num_lat, num_lon), and the point's pixel offset
+    (px, py) within that 256x256 tile."""
+    num_lat_rad = math.radians(num_lat)
+    int_n = 2 ** int_zoom
+    num_x_tile_f = (num_lon + 180.0) / 360.0 * int_n
+    num_y_tile_f = (1.0 - math.asinh(math.tan(num_lat_rad)) / math.pi) / 2.0 * int_n
+    int_x_tile, int_y_tile = int(num_x_tile_f), int(num_y_tile_f)
+    int_px = int((num_x_tile_f - int_x_tile) * 256)
+    int_py = int((num_y_tile_f - int_y_tile) * 256)
+    return int_x_tile, int_y_tile, int_px, int_py
+
+
+def fetch_tile(int_z, int_x, int_y):
+    str_url = TILE_URL.format(z=int_z, x=int_x, y=int_y)
+    obj_req = urllib.request.Request(str_url, headers={"User-Agent": TILE_USER_AGENT})
+    try:
+        with urllib.request.urlopen(obj_req, timeout=10) as obj_resp:
+            return obj_resp.read()
+    except Exception:
+        return None
+
+
+def render_map_thumbnail(num_lat, num_lon):
+    """A MAP_W x MAP_H RGBA crop of a single OSM tile around (num_lat,
+    num_lon), with a marker drawn at the exact point and rounded corners.
+    Only one tile is fetched (not a multi-tile mosaic), so the crop window
+    is clamped to stay inside it -- the marker can end up slightly
+    off-center when the point sits near a tile edge, rather than exactly
+    centered, which is an acceptable trade for one request per location
+    instead of four. Returns None if the tile fetch fails.
+    """
+    int_x_tile, int_y_tile, int_px, int_py = latlon_to_tile_pixel(num_lat, num_lon, TILE_ZOOM)
+    bytes_tile = fetch_tile(TILE_ZOOM, int_x_tile, int_y_tile)
+    if bytes_tile is None:
+        return None
+
+    obj_tile_img = Image.open(io.BytesIO(bytes_tile)).convert("RGBA")
+    int_left = min(max(int_px - MAP_W // 2, 0), 256 - MAP_W)
+    int_top = min(max(int_py - MAP_H // 2, 0), 256 - MAP_H)
+    obj_crop = obj_tile_img.crop((int_left, int_top, int_left + MAP_W, int_top + MAP_H))
+
+    obj_draw = ImageDraw.Draw(obj_crop)
+    int_marker_x, int_marker_y = int_px - int_left, int_py - int_top
+    obj_draw.ellipse(
+        (int_marker_x - MAP_MARKER_RADIUS, int_marker_y - MAP_MARKER_RADIUS,
+         int_marker_x + MAP_MARKER_RADIUS, int_marker_y + MAP_MARKER_RADIUS),
+        fill=MAP_MARKER_FILL, outline=MAP_MARKER_OUTLINE, width=2,
+    )
+
+    obj_mask = Image.new("L", (MAP_W, MAP_H), 0)
+    ImageDraw.Draw(obj_mask).rounded_rectangle(
+        (0, 0, MAP_W - 1, MAP_H - 1), radius=MAP_CORNER_RADIUS, fill=255
+    )
+    obj_crop.putalpha(obj_mask)
+    return obj_crop
+
+
+def save_bgra(obj_img, obj_path: Path) -> None:
+    # Pillow gives RGBA; mpv's overlay-add "bgra" format wants B,G,R,A byte
+    # order per pixel, so the bands are reordered before writing raw bytes.
+    obj_r, obj_g, obj_b, obj_a = obj_img.split()
+    obj_path.write_bytes(Image.merge("RGBA", (obj_b, obj_g, obj_r, obj_a)).tobytes())
+
+
+def ensure_map_thumbnail(obj_conn: sqlite3.Connection, str_geo_key, num_lat, num_lon, obj_maps_dir: Path):
+    """Returns the cached map thumbnail's path for str_geo_key, rendering
+    and caching a new one (counted in the returned int_new_renders flag)
+    if this coordinate hasn't been seen before."""
+    obj_row = obj_conn.execute(
+        "SELECT map_path FROM map_cache WHERE geo_key = ?", (str_geo_key,)
+    ).fetchone()
+    if obj_row:
+        return obj_row[0], False
+
+    obj_img = render_map_thumbnail(num_lat, num_lon)
+    str_map_path = None
+    if obj_img is not None:
+        obj_maps_dir.mkdir(parents=True, exist_ok=True)
+        str_safe_key = str_geo_key.replace(",", "_")
+        obj_map_path = obj_maps_dir / f"{str_safe_key}.bgra"
+        save_bgra(obj_img, obj_map_path)
+        str_map_path = str(obj_map_path)
+
+    obj_conn.execute(
+        "INSERT OR REPLACE INTO map_cache (geo_key, map_path) VALUES (?, ?)",
+        (str_geo_key, str_map_path),
+    )
+    time.sleep(TILE_DELAY_S)
+    return str_map_path, True
+
+
+def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_path, obj_maps_dir: Path):
     int_new_geocodes = 0
+    int_new_maps = 0
     for int_i, (int_media_id, str_path) in enumerate(lst_pending, 1):
         num_lat, num_lon = dict_coords_by_path.get(str_path, (None, None))
         str_location = None
@@ -318,6 +439,10 @@ def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_p
                 int_new_geocodes += 1
                 time.sleep(NOMINATIM_DELAY_S)
 
+            _, bool_new_map = ensure_map_thumbnail(obj_conn, str_geo_key, num_lat, num_lon, obj_maps_dir)
+            if bool_new_map:
+                int_new_maps += 1
+
         obj_conn.execute(
             """
             INSERT INTO media_locations (media_id, lat, lon, location)
@@ -328,13 +453,14 @@ def insert_locations(obj_conn: sqlite3.Connection, lst_pending, dict_coords_by_p
         if int_i % 20 == 0:
             obj_conn.commit()
     obj_conn.commit()
-    return int_new_geocodes
+    return int_new_geocodes, int_new_maps
 
 
 def main():
     obj_args = parse_args()
     obj_pictures_dir = Path(obj_args.pictures_dir).expanduser()
     obj_db_path = Path(obj_args.db).expanduser()
+    obj_maps_dir = Path(obj_args.maps_dir).expanduser()
 
     obj_conn = connect(obj_db_path)
 
@@ -352,13 +478,15 @@ def main():
         insert_dates(obj_conn, lst_pending, dict_dates_by_path)
 
     lst_unlocated = fetch_unlocated_media(obj_conn)
-    print(f"Reading GPS/location for {len(lst_unlocated)} new/unprocessed files")
+    print(f"Reading GPS/location/map for {len(lst_unlocated)} new/unprocessed files")
 
     if lst_unlocated:
         lst_unlocated_paths = [str_path for _, str_path in lst_unlocated]
         dict_coords_by_path = read_gps_coords(lst_unlocated_paths)
-        int_new_geocodes = insert_locations(obj_conn, lst_unlocated, dict_coords_by_path)
-        print(f"  {int_new_geocodes} new Nominatim lookups")
+        int_new_geocodes, int_new_maps = insert_locations(
+            obj_conn, lst_unlocated, dict_coords_by_path, obj_maps_dir
+        )
+        print(f"  {int_new_geocodes} new Nominatim lookups, {int_new_maps} new map thumbnails")
 
     int_total = obj_conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
     int_with_date = obj_conn.execute(

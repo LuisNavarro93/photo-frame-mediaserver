@@ -49,10 +49,11 @@ what's currently running on the machine.
 | `vim` | same, fallback/alternative editor | 9.1.2141-1ubuntu4.7 |
 | `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
 | `libimage-exiftool-perl` (`exiftool`) | slideshow — reads a photo/video's capture date for the on-screen caption when media-index hasn't indexed it yet; media-index — same lookup plus GPS, batched and stored in SQLite | 13.50+dfsg-1 |
+| `python3-pil` (Pillow) | media-index — crops/composites the map thumbnails and writes them as raw BGRA for mpv's `overlay-add` | 12.1.1-2ubuntu1.4 (already present; installed automatically as another package's dependency) |
 
 Install everything at once:
 ```bash
-sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl libimage-exiftool-perl
+sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl libimage-exiftool-perl python3-pil
 ```
 
 `util-linux` ships as part of the base Ubuntu install, so `rtcwake` is
@@ -141,20 +142,35 @@ Celsius) are constants near the top of `clock.lua`.
 
 A third overlay, bottom-left, captions whatever photo or video is
 currently showing with its capture date and location ("Taken 14 Mar
-2019 · Mérida, Mexico") when either is known. The primary source is
+2019 · Mérida, Mexico") when either is known, with a small (120x90)
+map thumbnail -- a real OpenStreetMap crop with a pin on it -- to its
+left when the location has one cached. The primary source is
 media-index's database (below) -- `query_media.py` is a few
 milliseconds, since it's a local SQLite lookup rather than reading EXIF
 live. A file media-index hasn't indexed yet (just added, scan not yet
 re-run) falls back to a direct, date-only `exiftool -DateTimeOriginal
--CreateDate` read -- no location, since that needs the reverse-geocode
-cache, not a live network call during the slideshow. Both paths run
-async on every `file-loaded` event, the same non-blocking way as the
-weather fetch, and a slow read that outlives its photo's 7s on screen is
-discarded rather than captioning the next photo with stale data
-(`str_caption_pending_path` tracks which file a given async result is
-still valid for). No date and no location means no caption --
-deliberately not falling back to the file's mtime, which reflects when
-it was copied onto this machine rather than when it was taken.
+-CreateDate` read -- no location and no map, since those need the
+reverse-geocode/map caches, not a live network call during the
+slideshow. Both paths run async on every `file-loaded` event, the same
+non-blocking way as the weather fetch, and a slow read that outlives its
+photo's 7s on screen is discarded rather than captioning the next photo
+with stale data (`str_caption_pending_path` tracks which file a given
+async result is still valid for). No date and no location means no
+caption -- deliberately not falling back to the file's mtime, which
+reflects when it was copied onto this machine rather than when it was
+taken.
+
+The map thumbnail is a second, separate overlay: mpv's text/vector OSD
+(`osd-overlay`, what the clock, weather and caption text all use) can't
+display a raster image at all, so it goes through mpv's `overlay-add`
+input command instead, which maps a **raw pixel buffer** (not a `.png`)
+onto the screen at an explicit position/size -- in **real on-screen
+pixels**, not the virtual OSD canvas the text overlays are drawn in, so
+`clock.lua` converts between the two via `mp.get_osd_size()` when
+deciding how far right of the map the caption text should start. The
+buffer itself is pre-rendered and cached by `build_index.py` (next
+section) -- nothing about rendering a map happens live during the
+slideshow, only loading an already-built file.
 
 - `slideshow.sh` → deployed to `~/.config/autostart/slideshow.sh` (`755`)
 - `slideshow-input.conf` → deployed to `~/.config/autostart/slideshow-input.conf` (`644`)
@@ -203,17 +219,48 @@ run only looks up EXIF data for anything new since the last one.
   instance) and sent with a generic, non-personal `User-Agent` identifying
   this project -- the policy asks automated clients for a contact method,
   which here is the GitHub repo link rather than anyone's address.
+- `map_cache` table: one small map thumbnail per the same rounded
+  coordinate `geocode_cache` uses, built from a single OpenStreetMap
+  tile (`tile.openstreetmap.org`, zoom 14) cropped to 120x90 around the
+  point, with a marker drawn on it and rounded corners cut in via an
+  alpha mask, saved as a raw BGRA pixel buffer (`media-index/maps/
+  <geo_key>.bgra`) rather than a `.png`, since that's what mpv's
+  `overlay-add` needs. Only one tile is fetched per location rather than
+  a multi-tile mosaic, so the crop is clamped to stay inside it -- the
+  marker can land slightly off-center when the point sits near a tile
+  edge, traded for one request per location instead of four. Same
+  one-request-per-second pacing as Nominatim, and the same generic
+  `User-Agent`; this draws real OpenStreetMap tile data rather than a
+  self-generated graphic, so it's worth being deliberate about staying
+  well inside their tile usage policy -- one-time, cached-forever, never
+  re-fetched, never a live request during the slideshow itself.
 
-The database itself lives at `~/Desktop/media-index/media.db` — not
+The database lives at `~/Desktop/media-index/media.db`, and the map
+thumbnails under `~/Desktop/media-index/maps/` next to it -- neither
 tracked in this repo (runtime data, not a script), and deliberately
 **not** inside `~/Pictures`: `slideshow.sh`'s `find ~/Pictures -type f`
 recurses into every subfolder, even hidden ones, and would otherwise hand
-the `.db` file to `mpv` as if it were a photo.
+the `.db` file (or a `.bgra` thumbnail) to `mpv` as if it were a photo.
 
-`query_media.py PATH` looks up one file's cached date/location by exact
-path and prints them (either may be blank) for the slideshow's caption
-overlay to read -- see `clock.lua` above. It exits non-zero rather than
-printing anything for a file `build_index.py` hasn't indexed yet.
+`query_media.py PATH` looks up one file's cached date/location/map path
+by exact path and prints them (any line may be blank) for the
+slideshow's caption overlay to read -- see `clock.lua` above. It exits
+non-zero rather than printing anything for a file `build_index.py`
+hasn't indexed yet.
+
+**Re-tagging a file's GPS after it's already been indexed** (e.g.
+editing EXIF with another tool) needs one extra step: `media_locations`
+already has a row for that file -- with `lat`/`lon`/`location` all
+`NULL`, recorded the first time it was indexed with no GPS -- and the
+skip check that makes re-runs cheap can't tell that apart from "already
+looked up, here's what was found". Clear it first so the file is seen
+as unprocessed again (there's no `sqlite3` CLI on this machine, hence
+Python rather than `sqlite3 media.db "DELETE ..."`):
+```bash
+python3 -c "import sqlite3; c = sqlite3.connect('/home/portrait/Desktop/media-index/media.db'); c.execute('DELETE FROM media_locations'); c.commit()"
+```
+(`geocode_cache` and `map_cache` are untouched and keep paying off --
+only genuinely new coordinates trigger a fresh Nominatim/tile lookup.)
 
 Run the indexer with:
 ```bash

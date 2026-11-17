@@ -34,6 +34,18 @@ local str_caption_date_format = "%d %b %Y"
 local str_media_index_query = "/home/portrait/Documents/photo-frame-mediaserver/media-index/query_media.py"
 local str_media_index_db    = "/home/portrait/Desktop/media-index/media.db"
 
+-- map thumbnail next to the caption, when the current photo's location
+-- has one cached. Its x/y/w/h are REAL on-screen pixels, not the virtual
+-- OSD canvas the text overlays use above -- overlay-add composites raw
+-- pixels directly onto the video surface, unrelated to libass's scaling.
+local int_map_w                  = 120   -- must match build_index.py's MAP_W/MAP_H
+local int_map_h                  = 90
+local int_map_margin_x           = 32    -- real screen pixels
+local int_map_margin_y           = 32
+local int_caption_gap_after_map  = 12    -- virtual-canvas units, text-to-map gap
+local int_map_overlay_id         = 1
+local bool_map_shown             = false
+
 -- weather (Open-Meteo: free, no API key -- https://open-meteo.com)
 -- "Icon-forward hero" layout: today's icon + daily low-high lead, with a
 -- rain-start time below (omitted entirely on a dry day); tomorrow trails
@@ -122,7 +134,29 @@ end
 -- instead of captioning the next photo with the wrong date.
 local str_caption_pending_path = nil
 
-local function draw_caption(str_date, str_location)
+local function draw_caption(str_date, str_location, str_map_path)
+    local int_text_x = int_caption_margin_x
+
+    if str_map_path and str_map_path ~= "" then
+        local int_real_w, int_real_h = mp.get_osd_size()
+        if not int_real_w or int_real_w == 0 then int_real_w = 1024 end
+        if not int_real_h or int_real_h == 0 then int_real_h = 576 end
+        local num_scale = obj_caption_overlay.res_x / int_real_w
+
+        mp.command_native({
+            name = "overlay-add", id = int_map_overlay_id,
+            x = int_map_margin_x, y = int_real_h - int_map_margin_y - int_map_h,
+            file = str_map_path, offset = 0, fmt = "bgra",
+            w = int_map_w, h = int_map_h, stride = int_map_w * 4,
+        })
+        bool_map_shown = true
+
+        int_text_x = math.floor((int_map_margin_x + int_map_w) * num_scale) + int_caption_gap_after_map
+    elseif bool_map_shown then
+        mp.command_native({ name = "overlay-remove", id = int_map_overlay_id })
+        bool_map_shown = false
+    end
+
     if not str_date and not str_location then
         obj_caption_overlay.data = ""
         obj_caption_overlay:update()
@@ -141,7 +175,7 @@ local function draw_caption(str_date, str_location)
     -- \an1 = anchor bottom-left; same white-fill/black-outline treatment as the clock.
     obj_caption_overlay.data = string.format(
         "{\\an1\\pos(%d,%d)\\b1\\bord2\\shad1\\1c&HFFFFFF&\\3c&H000000&\\4c&H000000&\\fs%d}%s",
-        int_caption_margin_x, obj_caption_overlay.res_y - int_caption_margin_y,
+        int_text_x, obj_caption_overlay.res_y - int_caption_margin_y,
         int_caption_size, str_text)
     obj_caption_overlay:update()
 end
@@ -176,14 +210,14 @@ local function fetch_caption_live(str_path)
         end
         local str_date = first_line(obj_result.stdout or "")
         if str_date then
-            draw_caption(str_date, nil)
+            draw_caption(str_date, nil, nil)
         end
     end)
 end
 
 local function fetch_caption(str_path)
     str_caption_pending_path = str_path
-    draw_caption(nil, nil)  -- clear immediately so the old photo's caption doesn't linger
+    draw_caption(nil, nil, nil)  -- clear immediately so the old photo's caption/map don't linger
     mp.command_native_async({
         name = "subprocess",
         args = {"python3", str_media_index_query, str_path, "--db", str_media_index_db},
@@ -194,11 +228,13 @@ local function fetch_caption(str_path)
             return  -- a newer file has since loaded; this result is stale
         end
         if bool_ok and obj_result and obj_result.status == 0 then
-            local str_date, str_location = (obj_result.stdout or ""):match("^(.-)\n(.-)\n?$")
+            local str_date, str_location, str_map_path =
+                (obj_result.stdout or ""):match("^(.-)\n(.-)\n(.-)\n?$")
             if str_date == "" then str_date = nil end
             if str_location == "" then str_location = nil end
+            if str_map_path == "" then str_map_path = nil end
             if str_date or str_location then
-                draw_caption(str_date, str_location)
+                draw_caption(str_date, str_location, str_map_path)
                 return
             end
         end
