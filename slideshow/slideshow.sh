@@ -20,6 +20,7 @@ while true; do
         --script=/home/portrait/.config/mpv/scripts/clock.lua \
         --image-display-duration=7 \
         --input-conf="$INPUT_CONF" \
+        --input-ipc-server=/tmp/mpv-slideshow.sock \
         --playlist="$PLAYLIST" 2>&1 | \
     stdbuf -oL grep --line-buffered -iE '^Playing:|error|fail|warning|cannot|unsupported|invalid' | \
     while IFS= read -r line; do

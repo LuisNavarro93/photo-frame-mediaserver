@@ -116,6 +116,12 @@ LEFT/RIGHT arrow keys are bound to jump to the previous/next picture
 binds those keys to seeking within the current file rather than playlist
 navigation.
 
+`mpv` also exposes a JSON IPC socket at `/tmp/mpv-slideshow.sock`
+(`--input-ipc-server`), so a specific file can be queued as the next
+slide from outside mpv without restarting the slideshow -- connect to the
+socket and send `{"command": ["loadfile", "<path>", "insert-next"]}`
+as a newline-terminated JSON line (e.g. via Python's `socket` module).
+
 A small `mpv` Lua script (`clock.lua`) draws the current date and time in
 the top-right corner via an OSD overlay, refreshed every second, so the
 frame doubles as a clock. It lives in mpv's scripts dir (auto-loaded) and is
