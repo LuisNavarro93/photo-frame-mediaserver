@@ -15,7 +15,8 @@
       <a href="{% url 'locator:landing' %}">Fix locations</a>
     </nav>
     {% block header_extra %}{% endblock %}
-    <a class="btn btn-small app-logout" href="{% url 'logout' %}">Log out</a>
+    <span class="app-version">v{{ str_version }}</span>
+    <a class="btn btn-small" href="{% url 'logout' %}">Log out</a>
   </header>
   <main class="app-main">
     {% block content %}{% endblock %}

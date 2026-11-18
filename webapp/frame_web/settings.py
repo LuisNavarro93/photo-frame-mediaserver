@@ -61,6 +61,7 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
+                "frame_web.context_processors.version",
             ],
         },
     },

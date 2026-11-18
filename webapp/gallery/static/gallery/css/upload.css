@@ -1,23 +1,11 @@
-.upload-box {
-  max-width: 640px;
-  margin: 32px auto;
-  padding: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-
-.upload-box h1 { margin: 0 0 4px; font-size: 22px; }
-.upload-hint { margin: 0 0 18px; color: var(--text-muted); }
-
-.upload-box form {
+.upload-form {
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.upload-box input[type="file"] {
+.upload-form input[type="file"] {
   flex: 1;
   min-width: 220px;
   color: var(--text);
@@ -26,15 +14,10 @@
 .upload-results {
   list-style: none;
   margin: 18px 0 0;
-  padding: 0;
+  padding: 12px 0 0;
   border-top: 1px solid var(--border);
-  padding-top: 12px;
 }
 
 .upload-results li { padding: 3px 0; }
 .upload-results li.is-ok { color: var(--ok); }
 .upload-results li.is-error { color: var(--danger); }
-
-@media (max-width: 640px) {
-  .upload-box { margin: 0; border-radius: 0; border-width: 0 0 1px; padding: 16px; }
-}

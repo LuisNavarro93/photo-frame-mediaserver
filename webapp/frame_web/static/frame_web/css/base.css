@@ -64,9 +64,30 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 
-.app-logout { margin-left: auto; }
+.app-version { margin-left: auto; color: var(--text-muted); font-size: 12px; }
 
 .app-main { flex: 1; min-height: 0; }
+
+/* Shared card used by every "pick something, then act on it" page
+   (upload, the locator's folder picker) -- kept here, not per-app, so
+   they read as one design system instead of each inventing its own box. */
+.picker {
+  max-width: 860px;
+  margin: 32px auto;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.picker h1 { margin: 0 0 4px; font-size: 22px; }
+.picker h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.picker-hint { margin: 0 0 18px; color: var(--text-muted); }
+.picker-error { color: var(--danger); }
+
+@media (max-width: 640px) {
+  .picker { margin: 0; border-radius: 0; border-width: 0 0 1px; padding: 16px; }
+}
 
 .btn {
   display: inline-flex;

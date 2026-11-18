@@ -8,14 +8,14 @@
 {% endblock %}
 
 {% block content %}
-<section class="upload-box">
+<section class="picker">
   <h1>Add pictures or videos</h1>
-  <p class="upload-hint">
+  <p class="picker-hint">
     They're saved into Pictures/uploads and show up in the slideshow once it
     loops around to them.
   </p>
 
-  <form method="post" enctype="multipart/form-data">
+  <form class="upload-form" method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="file" name="files" multiple accept="image/*,video/*">
     <button type="submit" class="btn btn-primary">Upload</button>
