@@ -50,10 +50,12 @@ what's currently running on the machine.
 | `curl` | testing FTP/HTTP endpoints from the shell | 8.18.0-1ubuntu2.3 |
 | `libimage-exiftool-perl` (`exiftool`) | slideshow — reads a photo/video's capture date for the on-screen caption when media-index hasn't indexed it yet; media-index — same lookup plus GPS, batched and stored in SQLite | 13.50+dfsg-1 |
 | `python3-pil` (Pillow) | media-index — crops/composites the map thumbnails and writes them as raw BGRA for mpv's `overlay-add` | 12.1.1-2ubuntu1.4 (already present; installed automatically as another package's dependency) |
+| `python3-django` | webapp — uploads and the locator tool are a small Django project | 5.2.9 |
+| `python3-piexif` | webapp/locator — writes GPS EXIF tags into pictures (the same library the ported exif-location-patcher code uses) | 1.1.3-2build1 |
 
 Install everything at once:
 ```bash
-sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl libimage-exiftool-perl python3-pil
+sudo apt install util-linux mpv openssh-server vsftpd jellyfin git neovim vim curl libimage-exiftool-perl python3-pil python3-django python3-piexif
 ```
 
 `util-linux` ships as part of the base Ubuntu install, so `rtcwake` is
@@ -292,6 +294,55 @@ Run the indexer with:
 python3 media-index/build_index.py
 ```
 
+## webapp
+
+A small Django project (`webapp/`) so pictures/videos can be added, and
+GPS locations fixed, from any device on the home network — not just by
+copying files into `~/Pictures` over SSH/FTP. Runs in place inside this
+repo (no virtualenv, uses the `python3-django`/`python3-piexif` apt
+packages above), bound to the whole LAN at
+<http://192.168.1.140:8800/>.
+
+It's two apps behind one login:
+
+- **Upload** (`/`) — pick one or more pictures/videos and they're saved
+  into `~/Pictures/uploads/`. `slideshow.sh` re-scans the whole folder
+  every time it loops the playlist, so new uploads show up on their own;
+  run `python3 media-index/build_index.py` afterwards to get their
+  "Taken ‹date›" caption and map sooner rather than whenever the
+  indexer is next run anyway.
+- **Fix locations** (`/locate/`) — browse into a folder under
+  `~/Pictures`, see its pictures/videos as thumbnails next to a map, and
+  click/drag a pin to set or correct where one (or several, selected
+  together) was taken. This is the same `gps.py` logic and front-end
+  (Leaflet + marker clustering) as the standalone
+  [exif-location-patcher](https://github.com/LuisNavarro93/exif-location-patcher)
+  tool, carried over as `locator/`, with one change: that tool's own
+  folder browser can reach anywhere your account can read, which its
+  README explicitly says is only safe because it listens on
+  `127.0.0.1`. Reachable from the LAN instead, `locator/services.py`
+  resolves every folder/file through `GALLERY_ROOT_DIR` (`~/Pictures`)
+  and refuses anything outside it, even if a request asks to — see
+  `resolve_folder()`.
+
+**Login:** both apps sit behind one shared password (no per-user
+accounts, no database — sessions are signed cookies, checked by
+`frame_web/auth.py`'s `LoginRequiredMiddleware`), because unauthenticated
+write access would let any device on the Wi-Fi upload files or rewrite a
+photo's GPS data. Set/change it with:
+```bash
+cd webapp && python3 set_password.py
+```
+The hash lives at `~/.config/photo-frame-web/password.hash` (not in this
+repo). `DEBUG` defaults to `false` and `DATA_UPLOAD_MAX_MEMORY_SIZE` is
+uncapped (so a large phone video upload isn't rejected by Django before
+it even reaches disk) — see `frame_web/settings.py` for the rest.
+
+Started the same way as the slideshow: an autostart script
+(`webapp/photo-frame-web.sh`) runs
+`manage.py runserver 0.0.0.0:8800 --noreload` in a restart loop, logging
+to `~/Desktop/logs/webapp.log`.
+
 ## Reinstalling from this repo
 
 ```bash
@@ -317,6 +368,13 @@ cp slideshow/slideshow-input.conf ~/.config/autostart/
 cp slideshow/slideshow.desktop ~/.config/autostart/
 mkdir -p ~/.config/mpv/scripts
 cp slideshow/clock.lua ~/.config/mpv/scripts/
+
+# webapp
+mkdir -p ~/.config/autostart
+cp webapp/photo-frame-web.sh ~/.config/autostart/
+chmod 755 ~/.config/autostart/photo-frame-web.sh
+cp webapp/photo-frame-web.desktop ~/.config/autostart/
+cd webapp && python3 set_password.py && cd ..
 ```
 
 ## Jellyfin (not a script in this repo — reference only)

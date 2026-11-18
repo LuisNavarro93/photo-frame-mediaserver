@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Fix locations · Photo Frame{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="{% static 'locator/css/landing.css' %}">
+{% endblock %}
+
+{% block content %}
+<section class="picker">
+  <h1>Pick a folder</h1>
+  <p class="picker-hint">
+    Browse into a folder inside your pictures library, then open it to see
+    what's there and where each one was taken.
+  </p>
+
+  {% if str_error %}<p class="picker-error">{{ str_error }}</p>{% endif %}
+
+  <div class="picker-current" title="{{ str_folder }}">{{ str_relative }}</div>
+
+  <div class="picker-body">
+    <ul class="folder-list">
+      {% if str_parent is not None %}
+        <li><a class="folder folder-up" href="?path={{ str_parent|urlencode }}">..</a></li>
+      {% endif %}
+      {% for obj_entry in lst_subfolders %}
+        <li><a class="folder" href="?path={{ obj_entry.str_path|urlencode }}">{{ obj_entry.str_name }}</a></li>
+      {% empty %}
+        <li class="folder-empty">No subfolders here.</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="picker-footer">
+    <span class="picker-count">
+      {{ int_media_count }} picture{{ int_media_count|pluralize }}/video{{ int_media_count|pluralize }} in this folder
+    </span>
+    <a class="btn btn-primary{% if not int_media_count %} btn-disabled{% endif %}"
+       href="{% url 'locator:workspace' %}?folder={{ str_folder|urlencode }}">Open this folder</a>
+  </div>
+</section>
+{% endblock %}

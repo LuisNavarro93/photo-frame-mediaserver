@@ -1,0 +1,5 @@
+[Desktop Entry]
+Exec=.config/autostart/photo-frame-web.sh
+Name=Photo Frame Web
+Terminal=false
+Type=Application

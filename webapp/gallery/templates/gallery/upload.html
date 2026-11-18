@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Upload · Photo Frame{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="{% static 'gallery/css/upload.css' %}">
+{% endblock %}
+
+{% block content %}
+<section class="upload-box">
+  <h1>Add pictures or videos</h1>
+  <p class="upload-hint">
+    They're saved into Pictures/uploads and show up in the slideshow once it
+    loops around to them.
+  </p>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="file" name="files" multiple accept="image/*,video/*">
+    <button type="submit" class="btn btn-primary">Upload</button>
+  </form>
+
+  {% if lst_results %}
+  <ul class="upload-results">
+    {% for dict_result in lst_results %}
+      <li class="{% if dict_result.ok %}is-ok{% else %}is-error{% endif %}">
+        {{ dict_result.name }}
+        {% if dict_result.ok %}— uploaded{% else %}— {{ dict_result.error }}{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

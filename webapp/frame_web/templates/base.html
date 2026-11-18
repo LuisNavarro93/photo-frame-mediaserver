@@ -1,0 +1,25 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Photo Frame{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'frame_web/css/base.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <header class="app-header">
+    <a class="app-title" href="{% url 'gallery:upload' %}">Photo Frame</a>
+    <nav class="app-nav">
+      <a href="{% url 'gallery:upload' %}">Upload</a>
+      <a href="{% url 'locator:landing' %}">Fix locations</a>
+    </nav>
+    {% block header_extra %}{% endblock %}
+    <a class="btn btn-small app-logout" href="{% url 'logout' %}">Log out</a>
+  </header>
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,89 @@
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eceef2;
+  --text: #1d2129;
+  --text-muted: #626b7a;
+  --border: #d5d9e0;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --danger: #c0352b;
+  --ok: #1f8a4c;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171c;
+    --surface: #1e2128;
+    --surface-2: #282c35;
+    --text: #e6e8ec;
+    --text-muted: #9aa2b1;
+    --border: #353a45;
+    --accent: #4f8cff;
+    --danger: #ff6b5e;
+    --ok: #4cc27f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+a { color: var(--accent); }
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title { font-weight: 600; font-size: 16px; color: var(--text); text-decoration: none; }
+
+.app-nav { display: flex; gap: 14px; }
+.app-nav a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+.app-nav a:hover { color: var(--text); }
+
+.app-folder {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-logout { margin-left: auto; }
+
+.app-main { flex: 1; min-height: 0; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover { filter: brightness(0.96); }
+.btn-small { padding: 4px 10px; font-size: 13px; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.btn:disabled, .btn-disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
